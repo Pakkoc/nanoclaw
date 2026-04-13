@@ -63,7 +63,10 @@ if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
 import json, sys
 try:
     d = json.load(sys.stdin)
-    print(f"OK message_id={d.get(\"id\")} channel_id={d.get(\"channel_id\")} length={len(d.get(\"content\",\"\"))}")
+    mid = d.get("id")
+    cid = d.get("channel_id")
+    clen = len(d.get("content", ""))
+    print("OK message_id={} channel_id={} length={}".format(mid, cid, clen))
 except Exception:
     print(sys.stdin.read())
 '
