@@ -107,11 +107,12 @@ const monthlyRankingPrompt = `매월 1일 오전 9시 — 월간 랭킹 공지
    \`\`\`
    (\`<전월1일>\`, \`<당월1일>\`은 \`YYYY-MM-DD\` 형식 실제 날짜로 치환)
 
-## 공지 송신
+## 송신 방법
 
-공지 채널(${NOTICE_CHANNEL})에 아래 양식대로 송신. **제목의 \`{PREV_MONTH}\`는 위에서 계산한 전월 월 숫자(1~12)로 치환할 것** (예: 4월 데이터면 "4월 랭킹 발표"):
+NanoClaw의 streaming은 에이전트의 **마지막 응답만** 현재 그룹 채널로 보낸다. 공지 채널(${NOTICE_CHANNEL})은 현재 그룹의 채널이 아니므로 NanoClaw 텍스트 응답으로는 도달할 수 없다. 대신 **\`post-discord\` 스킬**로 Discord API에 직접 게시한다:
 
-\`\`\`
+\`\`\`bash
+bash /home/node/.claude/skills/post-discord/post-discord.sh ${NOTICE_CHANNEL} <<'EOM'
 # <a:zbutterfly_pink:1371314035194335295> {PREV_MONTH}월 랭킹 발표 <a:zbutterfly_pink:1371314035194335295>
 
 ### 공부시간
@@ -123,7 +124,21 @@ const monthlyRankingPrompt = `매월 1일 오전 9시 — 월간 랭킹 공지
 ...
 
 ||@everyone ||
+EOM
 \`\`\`
+
+(\`{PREV_MONTH}\`는 위에서 계산한 실제 월 숫자로 치환. heredoc 안에 그대로 두지 말 것)
+
+송신 성공(\`{"id":..., "channel_id":...}\` JSON 응답) 확인 후 업무일지(\`/workspace/group/daily-memories/YYYY/MM/YYYY-MM-DD.md\`)에 한 줄 append:
+
+\`\`\`
+## 월간 랭킹 공지 — <YYYY>-<MM>-<DD>
+- 공지 채널(${NOTICE_CHANNEL})에 {PREV_MONTH}월 랭킹 게시 완료
+- 공부시간 TOP1: <닉네임> - XXh XXm
+- 이모지 반응 TOP1: <닉네임> - XX개
+\`\`\`
+
+마지막 응답(=관리자 채널 확인용): \`{PREV_MONTH}월 랭킹 공지 완료 ✅\` 한 줄로 짧게.
 
 ## 양식 규칙
 
@@ -131,11 +146,7 @@ const monthlyRankingPrompt = `매월 1일 오전 9시 — 월간 랭킹 공지
 - 레벨 매핑: 1=수습, 2=초급, 3=중급, 4=중급, 5=중급, 6=중급, 7=상급, 8=정예, 9=숙련
 - 시간 변환: hours → \`XXh XXm\` (예: 93.9시간 → \`93h 54m\`, 311.6시간 → \`311h 36m\`)
 - 멘션은 \`<@user_id>\` 형식으로 (닉네임 아닌 실제 Discord user_id)
-- TOP10/TOP3 모두 1위부터 순서대로
-
-## 업무일지 기록
-
-daily-memories/YYYY/MM/YYYY-MM-DD.md 에 공지 완료 사실 + TOP1 닉네임/시간/이모지수 추가.`;
+- TOP10/TOP3 모두 1위부터 순서대로`;
 
 // ─────────────── 태스크 정의 ───────────────
 
