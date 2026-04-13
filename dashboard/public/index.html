@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🐸 개굴이 NanoClaw 대시보드</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <header>
+    <h1>🐸 개굴이 NanoClaw 대시보드</h1>
+    <div class="header-actions">
+      <button id="refresh-btn" onclick="loadAll()">🔄 새로고침</button>
+      <span id="last-updated"></span>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-section="today">🐸 오늘의 개굴이</button>
+    <button class="tab" data-section="nanoclaw">🤖 NanoClaw</button>
+    <button class="tab" data-section="stats">📊 DB 통계</button>
+    <button class="tab" data-section="ops">📚 운영 문서</button>
+    <button class="tab" data-section="files">📁 그룹 폴더</button>
+    <button class="tab" data-section="system">⚙️ 시스템</button>
+  </nav>
+
+  <main>
+    <!-- Section 1: 오늘의 개굴이 -->
+    <section id="section-today" class="section active">
+      <h2>🐸 오늘의 개굴이</h2>
+
+      <div class="two-col">
+        <div>
+          <div class="section-header-row">
+            <h3>📅 최근 7일 업무일지</h3>
+            <button id="send-report-btn" class="email-btn" title="오늘 업무일지를 Gmail로 발송">📧 이메일로 받기</button>
+          </div>
+          <div id="recent-work" class="log-container">
+            <div class="loading">불러오는 중...</div>
+          </div>
+        </div>
+        <div>
+          <h3>🧠 장기 기억 (memories.md)</h3>
+          <div id="long-memory" class="memory-box">
+            <div class="loading">불러오는 중...</div>
+          </div>
+
+          <h3>⚡ NanoClaw 서비스 상태</h3>
+          <div id="nanoclaw-service" class="process-box">
+            <div class="loading">불러오는 중...</div>
+          </div>
+
+          <h3>🕒 최근 수정된 메모리 파일</h3>
+          <div id="recent-memory" class="recent-memory">
+            <div class="loading">불러오는 중...</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 2: NanoClaw 메타데이터 -->
+    <section id="section-nanoclaw" class="section">
+      <h2>🤖 NanoClaw 운영 정보</h2>
+
+      <h3 style="margin-top:8px">⏰ 스케줄 태스크 (cron / heartbeat / once)</h3>
+      <div class="card">
+        <p class="subtle">매일·매월 자동 실행되는 작업과 일회성 테스트 태스크. <code>scheduled_tasks</code> 테이블 직접 조회.</p>
+        <div id="scheduled-tasks">
+          <div class="loading">불러오는 중...</div>
+        </div>
+      </div>
+
+      <h3 style="margin-top:24px">🏷️ 등록된 그룹 (registered_groups)</h3>
+      <div class="card">
+        <p class="subtle">개굴이가 응답하는 채팅방. <code>is_main</code>은 트리거 없이 모든 메시지에 응답하는 메인 그룹.</p>
+        <div id="registered-groups">
+          <div class="loading">불러오는 중...</div>
+        </div>
+      </div>
+
+      <h3 style="margin-top:24px">📦 실행 중인 컨테이너</h3>
+      <div class="card">
+        <p class="subtle"><code>docker ps -a --filter name=nanoclaw</code> 결과. 컨테이너는 메시지 수신 시 spawn되고 idle 후 종료됨.</p>
+        <div id="nanoclaw-containers">
+          <div class="loading">불러오는 중...</div>
+        </div>
+      </div>
+
+      <h3 style="margin-top:24px">💬 최근 메시지</h3>
+      <div class="card">
+        <p class="subtle">최근 30개의 인바운드/아웃바운드 메시지. <code>messages</code> 테이블에서 시간 역순.</p>
+        <div id="recent-messages">
+          <div class="loading">불러오는 중...</div>
+        </div>
+      </div>
+
+      <h3 style="margin-top:24px">🛠️ 컨테이너 스킬 (container/skills)</h3>
+      <div class="card">
+        <p class="subtle">에이전트 컨테이너 안에 자동 싱크되는 커스텀 스킬 목록. <code>SKILL.md</code> frontmatter + 본문 파싱.</p>
+        <div id="nanoclaw-skills">
+          <div class="loading">불러오는 중...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 3: DB 통계 -->
+    <section id="section-stats" class="section">
+      <h2>📊 마법사관학교 DB 통계</h2>
+
+      <h3 style="margin-top:8px">💼 Executive Summary</h3>
+      <div id="overview" class="overview-grid">
+        <div class="loading">불러오는 중...</div>
+      </div>
+
+      <h3>📈 유저 활동</h3>
+      <div class="chart-grid">
+        <div class="chart-box tall">
+          <div class="chart-header">
+            <h3>🏆 활동 시간 TOP 20</h3>
+            <div class="period-toggle" id="ranking-period">
+              <button class="period-btn active" data-period="all">역대</button>
+              <button class="period-btn" data-period="month">이번 달</button>
+              <button class="period-btn" data-period="30d">30일</button>
+              <button class="period-btn" data-period="7d">7일</button>
+            </div>
+          </div>
+          <canvas id="chart-ranking"></canvas>
+        </div>
+        <div class="chart-box tall">
+          <div class="chart-header">
+            <h3>😀 이모지 사용량 TOP 15 (유저별)</h3>
+            <div class="period-toggle" id="emoji-period">
+              <button class="period-btn" data-period="all">역대</button>
+              <button class="period-btn" data-period="month">이번 달</button>
+              <button class="period-btn active" data-period="30d">30일</button>
+              <button class="period-btn" data-period="7d">7일</button>
+            </div>
+          </div>
+          <canvas id="chart-emoji"></canvas>
+        </div>
+        <div class="chart-box">
+          <h3>📅 최근 30일 일일 활동</h3>
+          <canvas id="chart-streaks"></canvas>
+        </div>
+        <div class="chart-box">
+          <h3>🏠 기숙사별 인원</h3>
+          <canvas id="chart-dormitory"></canvas>
+        </div>
+      </div>
+
+      <h3>📈 성장 분석</h3>
+      <div class="chart-grid">
+        <div class="chart-box">
+          <h3>📅 월별 신규 가입 (최근 12개월)</h3>
+          <canvas id="chart-signups"></canvas>
+        </div>
+        <div class="chart-box">
+          <h3>🎯 코호트 유지율 (28일 내 음성 활동)</h3>
+          <canvas id="chart-retention"></canvas>
+        </div>
+      </div>
+
+      <h3>🔥 활동 패턴 히트맵 (최근 30일 · KST)</h3>
+      <div class="chart-box">
+        <div id="heatmap" class="heatmap-wrap">
+          <div class="loading">불러오는 중...</div>
+        </div>
+      </div>
+
+      <h3>⚠️ 이탈 위험 유저</h3>
+      <div class="chart-box">
+        <p class="subtle">과거 10시간 이상 활동했으나 14일 이상 미활동 (TOP 20)</p>
+        <div id="churn-risk">
+          <div class="loading">불러오는 중...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 4: 운영 문서 -->
+    <section id="section-ops" class="section">
+      <h2>📚 NanoClaw 운영 문서</h2>
+
+      <div class="search-bar">
+        <input type="text" id="docs-search-input" placeholder="🔍 docs/ 전체 검색 (예: SDK, 컨테이너, 보안)">
+        <button id="docs-search-btn">검색</button>
+        <button id="docs-search-clear" class="secondary">지우기</button>
+      </div>
+      <div id="docs-search-results" class="search-results"></div>
+
+      <div class="ops-grid two">
+        <div class="card">
+          <h3>🛠️ 컨테이너 스킬 인덱스</h3>
+          <div id="skills-index">
+            <div class="loading">불러오는 중...</div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>🕒 최근 수정된 문서</h3>
+          <div id="recent-docs">
+            <div class="loading">불러오는 중...</div>
+          </div>
+        </div>
+      </div>
+
+      <h3 style="margin-top:24px">📄 docs/ 문서 브라우저</h3>
+      <div class="file-browser docs-browser">
+        <aside id="docs-tree" class="file-tree">
+          <div class="loading">불러오는 중...</div>
+        </aside>
+        <div id="docs-viewer" class="file-viewer">
+          <p class="hint">👈 왼쪽에서 문서를 선택하세요</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 5: 그룹 폴더 -->
+    <section id="section-files" class="section">
+      <h2>📁 NanoClaw 그룹 폴더</h2>
+      <p class="subtle">호스트 경로: <code>~/nanoclaw/groups/</code>. 각 등록된 그룹의 <code>CLAUDE.md</code>, <code>memories.md</code>, <code>daily-memories/</code> 등을 직접 본다.</p>
+      <div class="file-browser">
+        <aside id="file-tree" class="file-tree">
+          <div class="loading">불러오는 중...</div>
+        </aside>
+        <div id="file-viewer" class="file-viewer">
+          <p class="hint">👈 왼쪽에서 파일을 선택하세요</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 6: 시스템 -->
+    <section id="section-system" class="section">
+      <h2>⚙️ 시스템 상태</h2>
+      <div class="system-grid">
+        <div class="card">
+          <h3>💾 호스트 리소스</h3>
+          <div id="host-info"><div class="loading">불러오는 중...</div></div>
+        </div>
+        <div class="card">
+          <h3>🔄 PM2 프로세스 목록</h3>
+          <div id="pm2-list"><div class="loading">불러오는 중...</div></div>
+        </div>
+        <div class="card wide">
+          <h3>📝 최근 Git 커밋 (NanoClaw)</h3>
+          <div id="git-info"><div class="loading">불러오는 중...</div></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
