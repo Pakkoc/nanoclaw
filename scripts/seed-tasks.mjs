@@ -86,15 +86,33 @@ const Q = '\u0027';
 
 const monthlyRankingPrompt = `매월 1일 오전 9시 — 월간 랭킹 공지
 
-1. 전월 기간 계산: 지난달 1일~말일
-2. 공부시간 TOP 10:
-   bash /home/node/.claude/skills/db-query/db-query.sh "SELECT u.user_id, u.nickname, u.level, ROUND(SUM(v.duration_seconds)/3600.0, 1) AS hours FROM voice_sessions_clean v JOIN users_clean u ON u.user_id = v.user_id WHERE v.started_at >= ${Q}전월1일${Q} AND v.started_at < ${Q}당월1일${Q} GROUP BY u.user_id, u.nickname, u.level ORDER BY hours DESC LIMIT 10"
-3. 이모지 반응 TOP 3:
-   bash /home/node/.claude/skills/db-query/db-query.sh "SELECT u.user_id, u.nickname, u.level, SUM(r.count) AS emoji_count FROM reaction_usage_clean r JOIN users_clean u ON u.user_id = r.user_id WHERE r.usage_date >= ${Q}전월1일${Q} AND r.usage_date < ${Q}당월1일${Q} GROUP BY u.user_id, u.nickname, u.level ORDER BY emoji_count DESC LIMIT 3"
+## 날짜 계산 (먼저 한다)
 
-4. 공지 채널(${NOTICE_CHANNEL})에 아래 형식으로 송신:
+오늘은 매월 1일 09:00 KST. **전월(=직전 달)** 의 데이터를 집계한다.
 
-# <a:zbutterfly_pink:1371314035194335295> 전월 랭킹 발표<a:zbutterfly_pink:1371314035194335295>
+1. 오늘 날짜를 KST 기준으로 확인 (예: 2026-05-01 → 전월=2026-04 = 4월)
+2. 전월의 월 숫자를 \`{PREV_MONTH}\` 로 둔다 (1~12)
+3. 전월 기간 = 전월1일 00:00 KST ~ 당월1일 00:00 KST (exclusive)
+   - 예: 전월=2026-04 → \`2026-04-01\` ~ \`2026-04-30\` (또는 \`< 2026-05-01\`)
+
+## DB 쿼리 (bash)
+
+1. 공부시간 TOP 10 — SQL의 날짜 리터럴은 위에서 계산한 실제 날짜로 치환:
+   \`\`\`bash
+   bash /home/node/.claude/skills/db-query/db-query.sh "SELECT u.user_id, u.nickname, u.level, ROUND(SUM(v.duration_seconds)/3600.0, 1) AS hours FROM voice_sessions_clean v JOIN users_clean u ON u.user_id = v.user_id WHERE v.started_at >= ${Q}<전월1일>${Q} AND v.started_at < ${Q}<당월1일>${Q} GROUP BY u.user_id, u.nickname, u.level ORDER BY hours DESC LIMIT 10"
+   \`\`\`
+2. 이모지 반응 TOP 3:
+   \`\`\`bash
+   bash /home/node/.claude/skills/db-query/db-query.sh "SELECT u.user_id, u.nickname, u.level, SUM(r.count) AS emoji_count FROM reaction_usage_clean r JOIN users_clean u ON u.user_id = r.user_id WHERE r.usage_date >= ${Q}<전월1일>${Q} AND r.usage_date < ${Q}<당월1일>${Q} GROUP BY u.user_id, u.nickname, u.level ORDER BY emoji_count DESC LIMIT 3"
+   \`\`\`
+   (\`<전월1일>\`, \`<당월1일>\`은 \`YYYY-MM-DD\` 형식 실제 날짜로 치환)
+
+## 공지 송신
+
+공지 채널(${NOTICE_CHANNEL})에 아래 양식대로 송신. **제목의 \`{PREV_MONTH}\`는 위에서 계산한 전월 월 숫자(1~12)로 치환할 것** (예: 4월 데이터면 "4월 랭킹 발표"):
+
+\`\`\`
+# <a:zbutterfly_pink:1371314035194335295> {PREV_MONTH}월 랭킹 발표 <a:zbutterfly_pink:1371314035194335295>
 
 ### 공부시간
 1. <@user_id> (레벨마법사) - XXh XXm
@@ -105,12 +123,19 @@ const monthlyRankingPrompt = `매월 1일 오전 9시 — 월간 랭킹 공지
 ...
 
 ||@everyone ||
+\`\`\`
 
-레벨 매핑: 1=수습, 2=초급, 3=중급, 4=중급, 5=중급, 6=중급, 7=상급, 8=정예, 9=숙련
-시간은 hours → h m 변환 (예: 93.9시간 → 93h 54m)
-멘션은 <@user_id> 형식으로 (실제 Discord user_id 사용).
+## 양식 규칙
 
-5. 업무일지 기록: daily-memories/YYYY/MM/YYYY-MM-DD.md 에 공지 완료 + TOP1 닉네임/시간/이모지수 추가.`;
+- **제목 \`{PREV_MONTH}\`는 반드시 실제 숫자로 치환** (예: \`# ... 4월 랭킹 발표 ...\`). \`{PREV_MONTH}\` 라는 글자를 그대로 두지 말 것
+- 레벨 매핑: 1=수습, 2=초급, 3=중급, 4=중급, 5=중급, 6=중급, 7=상급, 8=정예, 9=숙련
+- 시간 변환: hours → \`XXh XXm\` (예: 93.9시간 → \`93h 54m\`, 311.6시간 → \`311h 36m\`)
+- 멘션은 \`<@user_id>\` 형식으로 (닉네임 아닌 실제 Discord user_id)
+- TOP10/TOP3 모두 1위부터 순서대로
+
+## 업무일지 기록
+
+daily-memories/YYYY/MM/YYYY-MM-DD.md 에 공지 완료 사실 + TOP1 닉네임/시간/이모지수 추가.`;
 
 // ─────────────── 태스크 정의 ───────────────
 
