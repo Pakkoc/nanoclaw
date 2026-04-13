@@ -9,18 +9,32 @@ store/
 data/
 logs/
 
-# Groups - only track base structure and specific CLAUDE.md files
+# Groups — track only base structure + specific files
 groups/*
 !groups/main/
 !groups/global/
+!groups/discord_main/
+!groups/discord_tickets/
 groups/main/*
 groups/global/*
+groups/discord_main/*
+groups/discord_tickets/*
 !groups/main/CLAUDE.md
 !groups/global/CLAUDE.md
+!groups/global/soul.md
+!groups/global/user-context.md
+!groups/discord_main/CLAUDE.md
+!groups/discord_tickets/CLAUDE.md
 
-# Secrets
+# Secrets — never commit operational credentials
+groups/global/tools.env
+groups/*/memories.md
+groups/*/daily-memories/
+groups/*/logs/
 *.keys.json
 .env
+.env.local
+.env.*.local
 
 # Temp files
 .tmp-*

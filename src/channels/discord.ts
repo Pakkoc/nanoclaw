@@ -17,16 +17,25 @@ export interface DiscordChannelOpts {
   registeredGroups: () => Record<string, RegisteredGroup>;
 }
 
+// Virtual JID for ticket category catchall — all messages from ticket-*
+// channels under DISCORD_TICKET_CATEGORY_ID route here.
+const TICKET_VIRTUAL_JID = 'dc:tickets';
+
 export class DiscordChannel implements Channel {
   name = 'discord';
 
   private client: Client | null = null;
   private opts: DiscordChannelOpts;
   private botToken: string;
+  private ticketCategoryId: string | null;
 
   constructor(botToken: string, opts: DiscordChannelOpts) {
     this.botToken = botToken;
     this.opts = opts;
+    this.ticketCategoryId =
+      process.env.DISCORD_TICKET_CATEGORY_ID ||
+      readEnvFile(['DISCORD_TICKET_CATEGORY_ID']).DISCORD_TICKET_CATEGORY_ID ||
+      null;
   }
 
   async connect(): Promise<void> {
@@ -44,9 +53,25 @@ export class DiscordChannel implements Channel {
       if (message.author.bot) return;
 
       const channelId = message.channelId;
-      const chatJid = `dc:${channelId}`;
+      let chatJid = `dc:${channelId}`;
       let content = message.content;
       const timestamp = message.createdAt.toISOString();
+
+      // Ticket category catchall: rewrite JID to virtual group and tag
+      // content with the original channel so the agent can reply correctly.
+      // The agent is expected to prefix its response with
+      // `[reply-channel:<id>]` — sendMessage() parses and strips that tag.
+      const ticketChannel =
+        this.ticketCategoryId && message.guild
+          ? (message.channel as TextChannel)
+          : null;
+      const isTicketCatchall =
+        ticketChannel !== null &&
+        ticketChannel.parentId === this.ticketCategoryId &&
+        (ticketChannel.name?.startsWith('ticket-') ?? false);
+      if (isTicketCatchall) {
+        chatJid = TICKET_VIRTUAL_JID;
+      }
       const senderName =
         message.member?.displayName ||
         message.author.displayName ||
@@ -123,6 +148,13 @@ export class DiscordChannel implements Channel {
         }
       }
 
+      // Tag ticket catchall messages with their origin channel so the agent
+      // can route its reply back. This runs after all other content munging
+      // so the tag is always the leading prefix the agent sees.
+      if (isTicketCatchall) {
+        content = `[ticket-channel:${channelId} #${ticketChannel!.name}] ${content}`;
+      }
+
       // Store chat metadata for discovery
       const isGroup = message.guild !== null;
       this.opts.onChatMetadata(chatJid, timestamp, chatName, 'discord', isGroup);
@@ -182,6 +214,22 @@ export class DiscordChannel implements Channel {
       return;
     }
 
+    // Ticket catchall: the agent must tag its reply with
+    // [reply-channel:<id>] so we know which ticket to respond in.
+    // Falling through without a tag would send to a non-existent channel.
+    if (jid === TICKET_VIRTUAL_JID) {
+      const match = text.match(/^\[reply-channel:(\d+)\]\s*/);
+      if (!match) {
+        logger.warn(
+          { jid, textPreview: text.slice(0, 120) },
+          'Ticket reply missing [reply-channel:<id>] prefix — dropping',
+        );
+        return;
+      }
+      jid = `dc:${match[1]}`;
+      text = text.slice(match[0].length);
+    }
+
     try {
       const channelId = jid.replace(/^dc:/, '');
       const channel = await this.client.channels.fetch(channelId);
@@ -226,6 +274,9 @@ export class DiscordChannel implements Channel {
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
     if (!this.client || !isTyping) return;
+    // Can't target typing indicator at the virtual ticket group since
+    // we don't know the real channel until the agent's reply is parsed.
+    if (jid === TICKET_VIRTUAL_JID) return;
     try {
       const channelId = jid.replace(/^dc:/, '');
       const channel = await this.client.channels.fetch(channelId);
