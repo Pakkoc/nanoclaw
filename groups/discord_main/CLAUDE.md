@@ -403,3 +403,83 @@ bash /home/node/.claude/skills/db-query/db-query.sh "SELECT count(*) FROM users_
 
 - OpenClaw의 "티켓 카테고리 자동 응답"은 NanoClaw에서 아직 구현되지 않음. 티켓 채널에 응답하려면 각 티켓 채널을 개별 그룹으로 등록하거나 Discord 채널 코드를 확장해야 한다.
 - `재시작 절차`는 NanoClaw에서 `systemctl --user restart nanoclaw`로 변경됨.
+
+---
+
+## 🔎 티켓 그룹 활동 조회 (중요)
+
+너는 `discord_main` 그룹에서 돌고 있고, 티켓 채널(`discord_tickets` 그룹 = 가상 JID `dc:tickets`)과는 **완전히 다른 컨테이너/세션**에서 동작한다. 즉 티켓 쪽에서 무슨 일이 있었는지는 **기억에 없다**. 그래서 관리자가 "그 티켓에 응답했어?", "ticket-0776은 어떻게 됐어?", "channel_id 1493267208510640258에 뭐라고 답했어?" 같은 질문을 하면, **기억으로 답하지 말고 반드시 아래 방법으로 DB를 직접 조회해라**.
+
+### 어디에서 조회하나
+
+NanoClaw SQLite DB: `/workspace/project/store/messages.db` (너에게 read-write 권한 있음)
+
+티켓 메시지는 모두 `chat_jid='dc:tickets'`로 저장되고, 원본 채널은 content 맨 앞에 `[ticket-channel:<CHANNEL_ID> #ticket-XXXX]` 프리픽스로 박혀 있다.
+
+### 예시 쿼리
+
+**특정 티켓 채널의 최근 활동**:
+
+```bash
+sqlite3 /workspace/project/store/messages.db <<SQL
+SELECT datetime(timestamp, 'localtime') AS time,
+       is_from_me,
+       sender_name,
+       substr(content, 1, 300) AS content
+FROM messages
+WHERE chat_jid = 'dc:tickets'
+  AND content LIKE '%1493267208510640258%'
+ORDER BY timestamp DESC
+LIMIT 20;
+SQL
+```
+
+`is_from_me=1`이면 개굴이(너의 다른 세션)가 보낸 응답, `0`이면 사용자 메시지.
+
+**가장 최근 티켓 활동 TOP 10** (어떤 채널이든):
+
+```bash
+sqlite3 /workspace/project/store/messages.db <<SQL
+SELECT datetime(timestamp, 'localtime') AS time,
+       sender_name,
+       substr(content, 1, 200) AS content
+FROM messages
+WHERE chat_jid = 'dc:tickets'
+ORDER BY timestamp DESC
+LIMIT 10;
+SQL
+```
+
+**특정 티켓에서 다이어리 스크립트가 실행/완료됐는지 확인** (create-diary.sh는 외부 스크립트라 DB엔 안 남지만, tickets 컨테이너의 응답은 messages에 저장되므로 간접 확인):
+
+```bash
+sqlite3 /workspace/project/store/messages.db <<SQL
+SELECT datetime(timestamp, 'localtime') AS time,
+       substr(content, 1, 400) AS content
+FROM messages
+WHERE chat_jid = 'dc:tickets'
+  AND content LIKE '%<channel_id>%'
+  AND is_from_me = 1
+ORDER BY timestamp DESC
+LIMIT 5;
+SQL
+```
+
+### 규칙
+
+1. **관리자가 티켓 상태를 물으면 먼저 DB를 조회한 뒤 답하라.** 기억에 없다/모르겠다고 말하기 전에 무조건 조회부터.
+2. **"안 했어요" 같은 거짓 응답 금지.** 네가 다른 세션에서 한 일을 모를 수 있으니 DB가 진실.
+3. 결과를 사용자에게 보일 때는 **타임스탬프 + 발신자 + 핵심 내용**을 요약해서 한국어로. raw SQL 출력 그대로 붙이지 말 것.
+4. `channel_id`는 숫자 18자리쯤 되는 Discord 채널 ID. 관리자가 숫자를 말하면 그걸 `LIKE '%<숫자>%'`에 넣어라.
+5. `ticket-0776` 같은 이름 표기를 주면 `LIKE '%#ticket-0776]%'`로 매치 가능.
+
+### Discord API로 채널 확인
+
+단순 그 채널 아직 있어?는 curl로:
+
+```bash
+source /workspace/global/tools.env
+curl -sS -H "Authorization: Bot $DISCORD_BOT_TOKEN"   -H 'User-Agent: DiscordBot/1.0'   "https://discord.com/api/v10/channels/<channel_id>"
+```
+
+`Unknown Channel` 응답이면 삭제된 것, 이름/부모 정보가 나오면 존재.

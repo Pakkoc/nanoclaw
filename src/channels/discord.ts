@@ -1,4 +1,10 @@
-import { Client, Events, GatewayIntentBits, Message, TextChannel } from 'discord.js';
+import {
+  Client,
+  Events,
+  GatewayIntentBits,
+  Message,
+  TextChannel,
+} from 'discord.js';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
@@ -53,7 +59,8 @@ export class DiscordChannel implements Channel {
       if (message.author.bot) return;
 
       const channelId = message.channelId;
-      let chatJid = `dc:${channelId}`;
+      const realJid = `dc:${channelId}`;
+      let chatJid = realJid;
       let content = message.content;
       const timestamp = message.createdAt.toISOString();
 
@@ -113,18 +120,20 @@ export class DiscordChannel implements Channel {
 
       // Handle attachments — store placeholders so the agent knows something was sent
       if (message.attachments.size > 0) {
-        const attachmentDescriptions = [...message.attachments.values()].map((att) => {
-          const contentType = att.contentType || '';
-          if (contentType.startsWith('image/')) {
-            return `[Image: ${att.name || 'image'}]`;
-          } else if (contentType.startsWith('video/')) {
-            return `[Video: ${att.name || 'video'}]`;
-          } else if (contentType.startsWith('audio/')) {
-            return `[Audio: ${att.name || 'audio'}]`;
-          } else {
-            return `[File: ${att.name || 'file'}]`;
-          }
-        });
+        const attachmentDescriptions = [...message.attachments.values()].map(
+          (att) => {
+            const contentType = att.contentType || '';
+            if (contentType.startsWith('image/')) {
+              return `[Image: ${att.name || 'image'}]`;
+            } else if (contentType.startsWith('video/')) {
+              return `[Video: ${att.name || 'video'}]`;
+            } else if (contentType.startsWith('audio/')) {
+              return `[Audio: ${att.name || 'audio'}]`;
+            } else {
+              return `[File: ${att.name || 'file'}]`;
+            }
+          },
+        );
         if (content) {
           content = `${content}\n${attachmentDescriptions.join('\n')}`;
         } else {
@@ -155,9 +164,18 @@ export class DiscordChannel implements Channel {
         content = `[ticket-channel:${channelId} #${ticketChannel!.name}] ${content}`;
       }
 
-      // Store chat metadata for discovery
+      // Store chat metadata for discovery — always use the real channel JID
+      // even when routing through a virtual group (ticket catchall). This keeps
+      // each individual ticket channel visible in the chats table / dashboard
+      // while the virtual group still owns message processing.
       const isGroup = message.guild !== null;
-      this.opts.onChatMetadata(chatJid, timestamp, chatName, 'discord', isGroup);
+      this.opts.onChatMetadata(
+        realJid,
+        timestamp,
+        chatName,
+        'discord',
+        isGroup,
+      );
 
       // Only deliver full message for registered groups
       const group = this.opts.registeredGroups()[chatJid];
