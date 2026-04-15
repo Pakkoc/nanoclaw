@@ -32,40 +32,161 @@ const NOTICE_CHANNEL = '1231132864867860511';    // 월간 랭킹 공지 대상
 
 // ─────────────── Prompts ───────────────
 
-const dailyLogPrompt = `매일 오전 9시 — 업무일지 작성 (HEARTBEAT)
+const dailyLogPrompt = `매일 오전 9시 — 업무일지 작성 (HEARTBEAT, 크로스 그룹 요약 포함)
 
-사전 확인: 오늘 날짜의 daily-memories/YYYY/MM/YYYY-MM-DD.md 파일이 이미 존재하면 "HEARTBEAT_OK"만 응답하고 종료.
+**사전 확인**: 오늘 날짜의 \`daily-memories/YYYY/MM/YYYY-MM-DD.md\` 파일이 이미 존재하면 "HEARTBEAT_OK"만 응답하고 종료.
 
-없으면:
-1. 전날 업무일지(daily-memories/YYYY/MM/(어제).md)와 최근 세션 덤프를 참고
-2. (전날 09:00 ~ 오늘 08:59 KST) 동안의 활동 정리:
-   - 주요 질문/답변 요약
-   - 관리자 지시사항
-   - 주요 활동 (다이어리 채널 생성, 스킬 실행, 에러 처리 등)
-   - 특이사항
-3. Write 도구로 daily-memories/YYYY/MM/YYYY-MM-DD.md 저장 (경로 없으면 mkdir -p 먼저)
-4. 저장 후 read로 재확인
-5. 관리자 채널(${ADMIN_CHANNEL})에 "업무일지 작성 완료" 전달
+없으면 아래 전체 절차 수행.
 
-파일 템플릿:
+---
+
+## 📥 수집 대상 기간
+
+전날 09:00:00 KST ~ 오늘 08:59:59 KST (24시간 윈도우)
+
+KST는 UTC+9. 시간 비교 시 SQLite의 \`datetime(timestamp, '+9 hours')\` 로 변환하거나, 단순히 \`datetime(timestamp) >= datetime('now', '-24 hours')\` 를 쓰면 실행 시점 기준 24시간 전 범위와 동일.
+
+---
+
+## 🔍 수집 절차
+
+### 1️⃣ 자기 그룹(discord_main) 활동 — 기존
+
+- 전날 업무일지(\`daily-memories/YYYY/MM/(어제).md\`) 읽기
+- 자기 그룹 \`conversations/\` 디렉토리의 최근 세션 덤프 확인 (있으면)
+- 자기 그룹 메시지 로그 쿼리:
+
+\`\`\`bash
+sqlite3 /workspace/project/store/messages.db <<SQL
+SELECT datetime(timestamp) AS time, is_from_me, sender_name, substr(content, 1, 300) AS content
+FROM messages
+WHERE chat_jid = 'dc:${ADMIN_CHANNEL}'
+  AND datetime(timestamp) >= datetime('now', '-24 hours')
+ORDER BY timestamp;
+SQL
+\`\`\`
+
+여기서 추출: 주요 질문/답변, 관리자 지시사항, 오고 간 대화의 핵심
+
+### 2️⃣ 🆕 티켓 그룹(discord_tickets) 활동 — NEW
+
+티켓 카테고리 아래 모든 채널(ticket-*)의 인바운드/아웃바운드를 쿼리:
+
+\`\`\`bash
+sqlite3 /workspace/project/store/messages.db <<SQL
+SELECT datetime(timestamp) AS time, is_from_me, sender_name, substr(content, 1, 400) AS content
+FROM messages
+WHERE chat_jid = 'dc:tickets'
+  AND datetime(timestamp) >= datetime('now', '-24 hours')
+ORDER BY timestamp;
+SQL
+\`\`\`
+
+- 각 티켓 채널별로 그룹핑 (content 앞에 \`[ticket-channel:<CHANNEL_ID> #ticket-XXXX]\` 프리픽스가 붙어있음 — 그 안에서 ticket ID 추출)
+- is_from_me=0 = 사용자 요청, is_from_me=1 = 개굴이(티켓 그룹 세션) 응답
+- 요약 포맷 예: \`ticket-0776 (4lpaka): 다이어리 생성 요청 → 소용돌이 기숙사 채널 #<닉네임> 생성 완료\`
+- 에러/미해결 티켓이 있으면 별도 표기
+
+티켓 컨테이너가 실행한 bash 도구 결과(예: create-diary.sh 8단계 출력)는 메시지 로그엔 안 남지만, 티켓 세션 jsonl에는 있다. 필요하면 참고:
+
+\`\`\`bash
+ls /workspace/project/data/sessions/discord_tickets/.claude/projects/-workspace-group/ 2>/dev/null
+# jsonl 파일 있으면 tail로 최근 tool_result 확인 가능 (선택적)
+\`\`\`
+
+### 3️⃣ 🆕 스케줄 태스크 실행 결과 — NEW
+
+전날 24시간 동안 실행된 자동 태스크들 확인:
+
+\`\`\`bash
+sqlite3 /workspace/project/store/messages.db <<SQL
+SELECT id, schedule_value, datetime(last_run) AS last_run,
+       substr(last_result, 1, 200) AS result_preview, status
+FROM scheduled_tasks
+WHERE last_run IS NOT NULL
+  AND datetime(last_run) >= datetime('now', '-24 hours')
+ORDER BY last_run DESC;
+SQL
+\`\`\`
+
+예상되는 태스크:
+- \`migrated-heartbeat-memory-cleanup\` (매일 03:00) — 세션 덤프 정리 결과
+- \`migrated-heartbeat-daily-log\` (어제 09:00) — 어제의 업무일지 작성 이력
+- \`migrated-monthly-ranking\` (매월 1일 09:00) — 해당 일이 1일인 경우
+
+각 태스크의 성공/실패를 한 줄로 요약.
+
+### 4️⃣ 🆕 에러/이상 징후 — NEW (선택)
+
+\`task_run_logs\` 테이블에 실패 기록이 있으면 포함:
+
+\`\`\`bash
+sqlite3 /workspace/project/store/messages.db <<SQL
+SELECT datetime(run_at) AS run_at, task_id, status, substr(error, 1, 200) AS error
+FROM task_run_logs
+WHERE status = 'error' AND datetime(run_at) >= datetime('now', '-24 hours')
+ORDER BY run_at DESC
+LIMIT 10;
+SQL
+\`\`\`
+
+결과가 있으면 "⚠️ 특이사항"에 포함. 없으면 섹션 생략.
+
+---
+
+## 📝 파일 작성
+
+경로: \`daily-memories/YYYY/MM/YYYY-MM-DD.md\` (반드시 **계층 경로**, 평탄 경로 금지)
+경로 없으면 \`mkdir -p\` 먼저.
+
+### 파일 템플릿
+
+\`\`\`markdown
 # 업무일지 — YYYY-MM-DD (요일)
 
 ## 대상 기간
 (전날) 09:00 ~ (오늘) 08:59 (KST)
 
-## 주요 질문/답변
+## 📋 관리자 채널 활동
+
+### 주요 질문/답변
 - ...
 
-## 관리자 지시사항
-- ...
+### 관리자 지시사항
+- ... (지시자 이름 포함, 완료/미완료 표기)
 
-## 주요 활동
-- ...
+### 주요 활동
+- ... (파일 수정, 스킬 실행, DB 쿼리 등)
 
-## 특이사항
-- ...
+## 🎫 티켓 그룹 활동
 
-**경로 규칙**: 반드시 계층 경로(daily-memories/YYYY/MM/YYYY-MM-DD.md). 평탄 경로 금지.`;
+- **ticket-XXXX** (<닉네임>): <요청> → <결과>
+- **ticket-YYYY** (<닉네임>): <요청> → <결과>
+- 총 N건 처리 (성공 N, 실패 N, 미해결 N)
+
+## ⏰ 자동 태스크 실행
+
+| 태스크 | 시각 | 상태 | 결과 |
+|---|---|---|---|
+| migrated-heartbeat-memory-cleanup | 03:00 | ✅ | 삭제 0개 |
+| migrated-heartbeat-daily-log (어제분) | 09:00 | ✅ | 작성 완료 |
+
+## ⚠️ 특이사항
+- ... (에러, 이상 동작, 호스트 개입 필요 사항 등)
+\`\`\`
+
+섹션 중 **해당 이벤트가 없는 섹션은 "(없음)" 또는 생략**. 강제로 채우지 말 것.
+
+---
+
+## 📤 후속 작업
+
+1. Write 도구로 파일 저장
+2. Read로 재확인 (저장 성공 검증)
+3. 관리자 채널(${ADMIN_CHANNEL})에 **짧은 요약** 전달 (예: "업무일지 작성 완료 — 티켓 N건, 태스크 M건, 특이사항 X건")
+4. 긴 본문을 관리자 채널에 붙여넣지 말 것. 파일만 저장하고 한 줄 알림.
+
+**경로 규칙**: 반드시 계층 경로(\`daily-memories/YYYY/MM/YYYY-MM-DD.md\`). 평탄 경로 금지.`;
 
 const memoryCleanupPrompt = `매일 새벽 3시 — 오래된 세션 덤프 정리 (HEARTBEAT)
 
