@@ -308,20 +308,31 @@ if (dryRun) {
 
 const db = new Database(DB_PATH);
 const now = new Date().toISOString();
-const del = db.prepare('DELETE FROM scheduled_tasks WHERE id = ?');
-const ins = db.prepare(
+
+// UPSERT (ON CONFLICT) — DELETE+INSERT는 task_run_logs FK 제약에 걸린다.
+// UPDATE in-place로 prompt/schedule을 갱신하고, 행이 없으면 INSERT.
+const upsert = db.prepare(
   `INSERT INTO scheduled_tasks (
     id, group_folder, chat_jid, prompt, script,
     schedule_type, schedule_value, context_mode,
     next_run, status, created_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT(id) DO UPDATE SET
+    group_folder = excluded.group_folder,
+    chat_jid = excluded.chat_jid,
+    prompt = excluded.prompt,
+    script = excluded.script,
+    schedule_type = excluded.schedule_type,
+    schedule_value = excluded.schedule_value,
+    context_mode = excluded.context_mode,
+    next_run = excluded.next_run,
+    status = excluded.status`,
 );
 
 const tx = db.transaction(() => {
   for (const t of TASKS) {
-    del.run(t.id);
     const nr = nextRun(t.schedule_value);
-    ins.run(
+    upsert.run(
       t.id,
       GROUP_FOLDER,
       CHAT_JID,
