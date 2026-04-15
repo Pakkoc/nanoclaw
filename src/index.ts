@@ -732,6 +732,186 @@ function startDeployWatcher(): void {
   logger.info({ flagPath }, 'Deploy watcher started');
 }
 
+/**
+ * Pull watcher — polls origin/main every 30 seconds. When origin is ahead
+ * of local HEAD (i.e. Windows or another operator pushed new commits), the
+ * host runs:
+ *   1. git pull origin main --ff-only
+ *   2. npm run build
+ *   3. pm2 restart gaegul-dashboard (if dashboard/ changed)
+ *   4. process.exit(0) → systemd restarts NanoClaw with the new dist
+ *
+ * This is the symmetric counterpart to the deploy watcher. Together they
+ * make the mini PC auto-sync with GitHub in both directions:
+ *   - Outbound: admin agent writes data/ipc/deploy.flag → deploy watcher
+ *     commits/pushes to origin, builds, restarts.
+ *   - Inbound: external push (Windows VS Code, GitHub UI, CI) → pull watcher
+ *     fetches, FF-pulls, builds, restarts.
+ *
+ * Skip conditions (all quiet, no action):
+ *   - data/ipc/deploy.flag exists (outbound deploy in progress, let it finish)
+ *   - Uncommitted local changes (would block FF)
+ *   - Local and origin are identical (nothing to pull)
+ *   - Local is ahead of origin (we pushed more than origin has — odd state,
+ *     don't overwrite)
+ *
+ * Failure modes (logged, never crash):
+ *   - git fetch unreachable (offline, GitHub down) → debug log, next tick
+ *   - FF not possible (divergent history, force-push) → warn log, skip
+ *   - Build error → log, skip (keep running on old dist)
+ */
+function startPullWatcher(): void {
+  const projectRoot = process.cwd();
+  const ipcDir = path.join(projectRoot, 'data', 'ipc');
+  const flagPath = path.join(ipcDir, 'deploy.flag');
+  const logPath = path.join(ipcDir, 'pull.log');
+  fs.mkdirSync(ipcDir, { recursive: true });
+
+  const POLL_MS = 30_000;
+
+  const appendLog = (line: string): void => {
+    try {
+      fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${line}\n`);
+    } catch (err) {
+      logger.warn({ err }, 'pull.log append failed');
+    }
+  };
+
+  const runStep = (
+    label: string,
+    cmd: string,
+  ): { ok: boolean; out: string } => {
+    try {
+      const out = execSync(cmd, {
+        cwd: projectRoot,
+        encoding: 'utf-8',
+        timeout: 180000,
+        shell: '/bin/bash',
+      });
+      return { ok: true, out };
+    } catch (err) {
+      const e = err as { stderr?: Buffer; stdout?: Buffer; message?: string };
+      const msg = String(e?.stderr || e?.stdout || e?.message || err).slice(
+        0,
+        500,
+      );
+      appendLog(`  [${label}] FAIL ${msg}`);
+      return { ok: false, out: msg };
+    }
+  };
+
+  const processPull = (): void => {
+    // Skip if deploy is in progress — deploy watcher owns the commit path
+    if (fs.existsSync(flagPath)) return;
+
+    // Quick fetch to refresh origin/main
+    const fetch = runStep('git-fetch', 'git fetch origin main --quiet');
+    if (!fetch.ok) {
+      // Offline or GitHub hiccup — silent, don't spam logs
+      logger.debug({ err: fetch.out }, 'git fetch skipped');
+      return;
+    }
+
+    // Compare local vs origin
+    const local = runStep('git-rev-parse-head', 'git rev-parse HEAD');
+    const remote = runStep('git-rev-parse-remote', 'git rev-parse origin/main');
+    if (!local.ok || !remote.ok) return;
+
+    const localSha = local.out.trim();
+    const remoteSha = remote.out.trim();
+    if (localSha === remoteSha) return; // Already in sync
+
+    // Check if local is ahead of remote (we pushed more than origin has).
+    // This can happen temporarily during deploy; skip so we don't clobber.
+    const mergeBase = runStep(
+      'git-merge-base',
+      `git merge-base ${localSha} ${remoteSha}`,
+    );
+    if (!mergeBase.ok) return;
+    const base = mergeBase.out.trim();
+    if (base === remoteSha) {
+      // Local is ahead or diverged — do not pull
+      return;
+    }
+    if (base !== localSha) {
+      // Diverged history (not a clean FF) — log once and skip
+      appendLog(
+        `DIVERGENT: local=${localSha.slice(0, 7)} remote=${remoteSha.slice(0, 7)} base=${base.slice(0, 7)} — skipping pull, manual rebase needed`,
+      );
+      return;
+    }
+
+    // local is a strict ancestor of remote → clean FF
+    appendLog(
+      `BEGIN pull: local=${localSha.slice(0, 7)} → remote=${remoteSha.slice(0, 7)}`,
+    );
+
+    // Guard against uncommitted changes that would block FF pull
+    const dirty = runStep('git-dirty-check', 'git status --porcelain');
+    if (dirty.ok && dirty.out.trim()) {
+      appendLog(
+        `  [git-dirty-check] SKIP: uncommitted local changes present, not pulling`,
+      );
+      return;
+    }
+
+    // Fast-forward pull
+    const pull = runStep('git-pull-ff', 'git pull origin main --ff-only');
+    if (!pull.ok) {
+      appendLog('END pull: aborted at git pull (FF rejected)');
+      return;
+    }
+    appendLog(`  [git-pull-ff] OK to ${remoteSha.slice(0, 7)}`);
+
+    // Rebuild TypeScript
+    const build = runStep('npm-build', 'npm run build');
+    if (!build.ok) {
+      appendLog('END pull: aborted at npm run build (running stale dist)');
+      return;
+    }
+    appendLog('  [npm-build] OK');
+
+    // Dashboard file detection (same logic as deploy watcher)
+    const dashboardCheck = runStep(
+      'detect-dashboard',
+      `git diff-tree --no-commit-id --name-only -r ${localSha}..${remoteSha} | grep -c '^dashboard/' || true`,
+    );
+    const dashboardTouched =
+      dashboardCheck.ok && parseInt(dashboardCheck.out.trim(), 10) > 0;
+    if (dashboardTouched) {
+      const pm2Restart = runStep(
+        'pm2-restart-dashboard',
+        'pm2 restart gaegul-dashboard --update-env',
+      );
+      if (pm2Restart.ok) {
+        appendLog('  [pm2-restart-dashboard] OK');
+      } else {
+        appendLog(
+          '  [pm2-restart-dashboard] WARN: dashboard pulled but PM2 restart failed',
+        );
+      }
+    }
+
+    // Exit for systemd to restart with the new dist
+    appendLog('END pull: success — exiting for systemd restart');
+    logger.info(
+      { from: localSha.slice(0, 7), to: remoteSha.slice(0, 7) },
+      'Remote ahead, pulled and rebuilt, exiting for restart',
+    );
+    setTimeout(() => process.exit(0), 500);
+  };
+
+  setInterval(() => {
+    try {
+      processPull();
+    } catch (err) {
+      logger.error({ err }, 'Pull watcher tick failed');
+    }
+  }, POLL_MS);
+
+  logger.info({ intervalMs: POLL_MS }, 'Pull watcher started');
+}
+
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initDatabase();
@@ -913,6 +1093,7 @@ async function main(): Promise<void> {
   });
   startSessionCleanup();
   startDeployWatcher();
+  startPullWatcher();
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
