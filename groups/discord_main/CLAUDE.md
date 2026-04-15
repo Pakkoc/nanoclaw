@@ -589,7 +589,7 @@ curl -sS -H "Authorization: Bot $DISCORD_BOT_TOKEN"   -H 'User-Agent: DiscordBot
 | `groups/**/*.md` (CLAUDE.md, memories, daily-memories 등) | ✅ | ❌ | ❌ |
 | `groups/global/soul.md`, `user-context.md` | ✅ | ❌ | ❌ |
 | `scripts/seed-tasks.mjs` | ✅ | ❌ | 스케줄러 자동 폴링. 단 seed 재실행은 `node scripts/seed-tasks.mjs`로 수동 필요 |
-| `dashboard/**` (server.js, public/*) | ✅ | ❌ | ❌. pm2 재시작은 별도 (성호에게 안내) |
+| `dashboard/**` (server.js, public/*) | ✅ | ❌ | ❌ (NanoClaw는 그대로) — **하지만 deploy watcher가 자동으로 `pm2 restart gaegul-dashboard` 실행**. 브라우저 새로고침만 하면 새 UI/API 보임 |
 | **`src/**/*.ts`** (NanoClaw 호스트 코드) | ✅ | **✅** | **✅** |
 | **`container/**` (Dockerfile, agent-runner, 스킬)** | ✅ | 컨테이너 재빌드 필요. 이건 deploy 플래그로는 못 함. 성호에게 안내 | ❌ |
 | `package.json` 의존성 변경 | ✅ | ✅ + `npm install` 필요. 성호에게 안내 | ✅ |

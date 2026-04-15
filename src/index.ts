@@ -690,7 +690,32 @@ function startDeployWatcher(): void {
       return;
     }
 
-    // 6. Exit for systemd to restart with the new dist
+    // 6. If dashboard/ files changed, restart the gaegul-dashboard PM2
+    // process. The dashboard is a separate Node process managed by PM2,
+    // not by NanoClaw, so a NanoClaw systemd restart does NOT pick up
+    // dashboard/server.js or dashboard/public/* changes. Detect via
+    // git diff-tree on the just-made commit.
+    const dashboardCheck = runStep(
+      'detect-dashboard',
+      "git diff-tree --no-commit-id --name-only -r HEAD | grep -c '^dashboard/' || true",
+    );
+    const dashboardTouched =
+      dashboardCheck.ok && parseInt(dashboardCheck.out.trim(), 10) > 0;
+    if (dashboardTouched) {
+      const pm2Restart = runStep(
+        'pm2-restart-dashboard',
+        'pm2 restart gaegul-dashboard --update-env',
+      );
+      if (!pm2Restart.ok) {
+        appendLog(
+          '  [pm2-restart-dashboard] WARN: dashboard files committed but PM2 restart failed — host intervention needed',
+        );
+        // Do NOT abort: the commit/push/build succeeded, so NanoClaw
+        // restart should still proceed. Operator will see the warning.
+      }
+    }
+
+    // 7. Exit for systemd to restart with the new dist
     appendLog(`END: deploy success — exiting for systemd restart`);
     logger.info('Deploy successful, exiting for systemd restart in 500ms');
     setTimeout(() => process.exit(0), 500);
