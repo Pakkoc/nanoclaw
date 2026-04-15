@@ -17,7 +17,7 @@ Personal Claude assistant. See [README.md](README.md) for philosophy and setup. 
 
 ### 봇 정체성 & 등록된 그룹
 
-- **이름**: 개굴이 (말티즈 강아지 AI, 마법사관학교✦STUDY Discord 서버)
+- **이름**: 개굴이 (개구리 AI, 마법사관학교✦STUDY Discord 서버)
 - **관리자 4명**: 성호(`364764044948799491`), 죨디(`459757901251346452`), 요나새(`276024344101257216`), 호녈(`1341276764827156555`)
 - **`discord_main`** (is_main) — 🐸개굴이-업무전달 `dc:1489283292489449585`. 관리자 전용, 트리거 불필요
 - **`discord_tickets`** (non-main, non-trigger) — 가상 JID `dc:tickets`. 카테고리 `1227530533567991881` 하위 `ticket-*` 채널 캐치올. 인바운드 프리픽스 `[ticket-channel:<id> #ticket-XXXX]`, 아웃바운드 프리픽스 `[reply-channel:<id>]` 필수 (`src/channels/discord.ts`에서 파싱)

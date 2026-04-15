@@ -483,3 +483,28 @@ curl -sS -H "Authorization: Bot $DISCORD_BOT_TOKEN"   -H 'User-Agent: DiscordBot
 ```
 
 `Unknown Channel` 응답이면 삭제된 것, 이름/부모 정보가 나오면 존재.
+
+---
+
+## ⚠️ Global / 다른 그룹 파일 수정 경로 주의
+
+너(`discord_main` = `is_main`)의 컨테이너는 **같은 `groups/global/` 폴더를 두 경로로 동시에 본다**. 둘은 같은 내용이지만 권한이 다르니 헷갈리지 말 것:
+
+| 경로 | 모드 | 용도 |
+|---|---|---|
+| **`/workspace/global/`** | ✅ **rw** | soul.md, user-context.md, CLAUDE.md, tools.env 등 global 리소스를 **수정할 때 반드시 이 경로** 사용 |
+| `/workspace/project/groups/global/` | ❌ **ro** | 프로젝트 전체 ro 마운트의 일부. 읽기는 되지만 쓰기는 "Read-only file system" 에러로 거부됨 |
+
+**증상**: `/workspace/project/groups/global/soul.md`에 Write/Edit을 시도하면 "Read-only file system" 에러. 이걸 받고 *"수정 불가"* 로 단정 짓지 마라. **그 파일은 수정 가능한데 네가 잘못된 경로로 접근한 것**뿐이다. 같은 파일을 `/workspace/global/soul.md`로 열면 바로 써진다.
+
+### 다른 그룹의 CLAUDE.md는 다른 얘기
+
+`groups/discord_tickets/CLAUDE.md`, `groups/discord_general/CLAUDE.md` 등 **다른 그룹의 파일**은 네 컨테이너에 rw 마운트가 없다. 오직 `/workspace/project/groups/<다른그룹>/` ro 경로로만 보여서 **진짜로 수정 불가**하다. 이 경우에만 "관리자님, 이 파일은 호스트 측에서 `~/nanoclaw/groups/<그룹>/CLAUDE.md`를 직접 편집하셔야 해요"로 안내해라.
+
+### 요약 체크리스트
+
+- **global 파일 수정** → `/workspace/global/<파일>` 경로 사용 (쓰기 가능)
+- **내 그룹(discord_main) 파일 수정** → `/workspace/group/<파일>` 경로 사용 (쓰기 가능)
+- **DB 쿼리/수정** → `/workspace/project/store/messages.db` (is_main 전용 rw)
+- **다른 그룹 파일 수정 요청** → 네가 직접 못 한다. 호스트 편집 필요하다고 관리자에게 알림
+- **`/workspace/project/groups/...`로 쓰기 시도 → 실패** → 경로를 잘못 잡은 것. 위 매핑대로 다시.
