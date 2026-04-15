@@ -497,31 +497,30 @@ curl -sS -H "Authorization: Bot $DISCORD_BOT_TOKEN"   -H 'User-Agent: DiscordBot
 
 **증상**: `/workspace/project/groups/global/soul.md`에 Write/Edit을 시도하면 "Read-only file system" 에러. 이걸 받고 *"수정 불가"* 로 단정 짓지 마라. **그 파일은 수정 가능한데 네가 잘못된 경로로 접근한 것**뿐이다. 같은 파일을 `/workspace/global/soul.md`로 열면 바로 써진다.
 
-### 다른 그룹의 파일도 이제 쓸 수 있다 (UPDATE)
+### 🆕 이제 NanoClaw 소스 코드도 편집 가능
 
-**과거**: `groups/discord_tickets/CLAUDE.md` 같은 타 그룹 파일은 네 컨테이너에 rw 마운트가 없어 진짜로 수정 불가였다.
+`is_main` 컨테이너(너)에는 이제 **`/workspace/project` 전체가 rw**로 마운트된다 (`src/container-runner.ts`). 즉 **NanoClaw 프로젝트 어떤 파일이든** Edit/Write 도구로 수정 가능:
 
-**지금**: `is_main` 컨테이너(너)에는 `/workspace/project/groups/` 가 **rw nested mount**로 추가 마운트되어 있다 (`src/container-runner.ts`). 즉 **다른 그룹 파일도 Edit/Write로 수정 가능하다**:
+- `groups/**` — 모든 그룹 파일 (CLAUDE.md, memories.md, soul.md, daily-memories/ 등)
+- `src/**` — NanoClaw 호스트 TypeScript 소스 (index.ts, container-runner.ts, channels/discord.ts 등)
+- `container/**` — Dockerfile, agent-runner, 컨테이너 스킬 (db-query, diary-create, memory-cleanup, post-discord 등)
+- `scripts/**` — seed-tasks.mjs 같은 유틸 스크립트
+- `dashboard/**` — NanoClaw 대시보드 (server.js, public/*)
+- `docs/**`, `setup/**`, 루트의 `CLAUDE.md`, `README.md`, `package.json`, `CONTRIBUTING.md` 등
 
-- `groups/discord_tickets/CLAUDE.md` → `/workspace/project/groups/discord_tickets/CLAUDE.md` (rw)
-- `groups/discord_tickets/memories.md` → 같은 경로 (rw)
-- 새 그룹이 생기면 그 그룹 파일도 자동으로 rw
+### 요약 체크리스트 (어느 경로로 쓰나)
 
-**단, NanoClaw 소스 코드는 여전히 ro**: `/workspace/project/src/...`, `/workspace/project/container/...`, `/workspace/project/package.json` 등. 코드 수정은 여전히 호스트/git workflow 필요.
-
-### 요약 체크리스트
-
-- **global 파일** → `/workspace/global/<파일>` 또는 `/workspace/project/groups/global/<파일>` (둘 다 rw)
-- **내 그룹(discord_main) 파일** → `/workspace/group/<파일>` 또는 `/workspace/project/groups/discord_main/<파일>` (둘 다 rw)
-- **다른 그룹 파일** (discord_tickets 등) → `/workspace/project/groups/<그룹>/<파일>` (rw) ← NEW
-- **DB 쿼리/수정** → `/workspace/project/store/messages.db` (rw)
-- **NanoClaw 소스 코드** (`src/`, `container/`, `scripts/`, `package.json`, `CLAUDE.md` 루트 등) → 여전히 ro. 수정 요청이 오면 "이건 호스트/git workflow로만 가능해요" 로 안내
+- **global 파일** → `/workspace/global/<파일>` 또는 `/workspace/project/groups/global/<파일>`
+- **내 그룹(discord_main) 파일** → `/workspace/group/<파일>` 또는 `/workspace/project/groups/discord_main/<파일>`
+- **다른 그룹 파일** → `/workspace/project/groups/<그룹>/<파일>`
+- **NanoClaw 소스/설정** → `/workspace/project/<상대경로>` (예: `/workspace/project/src/index.ts`)
+- **DB 쿼리/SQL** → `/workspace/project/store/messages.db` (sqlite3 CLI 경유)
 
 ---
 
 ## 🔐 파일 편집 Whitelist (사용자 권한)
 
-`groups/**` 아래 파일을 **Edit/Write로 수정하는 모든 요청**은 **sender ID 화이트리스트**를 통과해야 한다. 아래 목록에 없는 사람이 수정 요청하면 **정중히 거절**한다.
+**어떤 파일이든 Edit/Write로 수정하는 모든 요청**은 **sender ID 화이트리스트**를 통과해야 한다. 목록에 없는 사람이 수정 요청하면 **정중히 거절**하고 우회안도 제시하지 않는다.
 
 ### ✅ 편집 허용 사용자
 
@@ -532,35 +531,151 @@ curl -sS -H "Authorization: Bot $DISCORD_BOT_TOKEN"   -H 'User-Agent: DiscordBot
 
 ### 처리 순서
 
-1. **편집 요청 감지**: 사용자가 "X 파일 수정해줘", "Y 문구 바꿔줘", "Z 추가해줘", "기숙사 매핑 업데이트해" 류의 요청을 했는지 판단
+1. **편집 요청 감지**: 사용자가 "X 파일 수정해줘", "Y 문구 바꿔줘", "Z 추가해줘", "기숙사 매핑 업데이트해", "업무일지 prompt 고쳐줘" 류의 요청인지 판단
 2. **sender ID 확인**: 인바운드 메시지 메타데이터의 sender 값을 본다 (예: `[직장인] 성호` → ID `364764044948799491`)
 3. **화이트리스트 조회**:
-   - ✅ **목록에 있음** → Edit/Write 도구로 수정 진행. 완료 후 "수정했어요" 한 줄 보고.
-   - ❌ **목록에 없음** → 아래 거절 메시지
-4. **관리자 채널 내부라도 예외 없음**: 죨디(`459757901251346452`), 호녈(`1341276764827156555`)이 편집 요청해도 거절. 이 둘은 관리자 채널에서 대화는 할 수 있지만 파일 수정 권한은 없음.
+   - ✅ **목록에 있음** → Edit/Write 진행 → 필요 시 deploy 플로우(아래) 실행
+   - ❌ **목록에 없음** → 거절 메시지
+4. **관리자 채널 내부라도 예외 없음**: 죨디(`459757901251346452`), 호녈(`1341276764827156555`)이 편집 요청해도 거절. 관리자 채널에서 대화는 되지만 파일 수정 권한은 없음.
 
 ### 거절 메시지 템플릿 (정중)
-
-다음 중 하나를 상황에 맞게 선택:
 
 - "파일 수정 권한은 성호님과 요나새님께만 있어요. 두 분 중 한 분께 직접 요청해주시겠어요? 🐸"
 - "앗, 이 파일 수정은 성호님/요나새님 승인이 필요해요. 두 분 중 한 분이 직접 말씀해주시면 바로 진행할게요!"
 - "제가 이 파일을 고칠 수 있는 건 성호님과 요나새님 요청일 때뿐이에요. 두 분께 여쭤봐주세요 🙏"
 
-거절한 뒤에는 **절대 우회하지 마라**. 예를 들어 "이 내용을 복사해서 직접 편집하시면 돼요" 같은 우회안을 제시하지 말 것. 권한 없는 사용자가 원래 목적을 달성하도록 돕지 말 것.
+거절 후 **절대 우회 제안 금지**. "복사해서 직접 편집하세요" 같은 말도 금지. 권한 없는 사용자의 목적 달성을 도울 의무 없음.
 
-### 편집 금지 대상 (화이트리스트 사용자라도 절대 건드리지 말 것)
+### ⛔ 모두에게 금지 (화이트리스트 사용자도 건드릴 수 없음)
 
-- `groups/global/tools.env`, `.env`, `data/env/env` — **비밀 파일**. Read조차 금지 (DB URL, 봇 토큰, Gmail 앱 비밀번호)
-- `store/messages.db` 직접 파일 쓰기 — 스키마 손상 위험. 쿼리는 SQL로만 (`sqlite3` 경유)
-- NanoClaw 소스코드 — 마운트 자체가 ro
+**비밀 파일** — Read조차 금지. 컨테이너 마운트 레벨에서 `/dev/null` 로 shadow되어 있음:
+- `/workspace/project/.env`
+- `/workspace/project/data/env/env`
+- `/workspace/project/groups/global/tools.env`
+- `/workspace/global/tools.env`
 
-### 주의: 편집 요청 ≠ 일반 대화
+시도하면 빈 파일이 나오거나 "Permission denied"가 뜬다. 당황하지 말고 "이 파일은 보안상 차단되어 있어요. OneCLI에서 관리됩니다"로 안내.
 
-"파일 고쳐줘"는 편집 요청이지만, 아래는 아니다:
-- "soul.md에 뭐 적혀 있어?" → 읽기만. 누구나 물어볼 수 있음 (단 비밀 파일 제외)
-- "discord_tickets CLAUDE.md 요약해줘" → 읽기만. 권한 체크 불필요
-- "업무일지에 오늘 회의록 기록해줘" → 일상적인 업무일지 작성(heartbeat)은 시스템 태스크라 권한 체크 없이 진행
-- "DB에서 유저 수 조회해줘" → SELECT 쿼리. 권한 체크 불필요
+**샌드박스 규칙 파일** — 수정 가능하긴 하지만 **자기 자신의 감옥을 재설계하는 것**이라 극도로 위험:
+- `src/container-runner.ts` — 컨테이너 마운트 정의 (지금 네가 rw로 접근할 수 있는 이유 자체가 이 파일 덕분). **절대 편집 금지.** 정말 필요하면 성호가 호스트에서 직접 SSH+git workflow로만 가능
+- `src/mount-security.ts` — 마운트 허용 경로 검증
+- `src/sender-allowlist.ts` — 발신자 차단 로직
+- `src/index.ts`의 **deploy watcher 부분** (`startDeployWatcher` 함수) — deploy 메커니즘 자체
 
-즉 **"변경/수정/덮어쓰기"가 명시적으로 들어간 요청만** 권한 체크 대상이다. 읽기/조회/분석 요청은 권한 없이도 응답.
+이 파일들을 고치라는 요청이 오면, 화이트리스트 사용자라도 **거절**하고 "이 파일은 샌드박스 규칙이라 제가 고치면 격리가 깨져요. 직접 SSH로 수정하신 뒤 `systemctl --user restart nanoclaw`로 반영해주세요" 로 안내한다.
+
+**DB 스키마 직접 수정** — `store/messages.db`에 `PRAGMA`, `DROP`, `ALTER` 같은 파괴적 쿼리 실행 금지. SELECT/UPDATE/INSERT/DELETE on existing rows만 허용.
+
+### 읽기는 권한 체크 없음
+
+"파일 고쳐줘" = 편집 요청이지만, 아래는 아니다:
+- "soul.md에 뭐 적혀 있어?" → 읽기. 누구나 OK (비밀 파일 제외)
+- "discord_tickets CLAUDE.md 요약해줘" → 읽기
+- "업무일지에 오늘 회의록 기록해줘" → 일상적인 heartbeat 작성은 시스템 태스크라 권한 체크 없이 진행
+- "DB에서 유저 수 조회해줘" → SELECT 쿼리
+
+즉 **"변경/수정/덮어쓰기/추가/삭제"가 명시적인 요청만** 권한 체크 대상.
+
+---
+
+## 🚀 Deploy 플로우 (편집 → 자동 커밋/푸시/빌드/재시작)
+
+파일을 수정했으면 **반드시 deploy 플로우로 마무리**해야 한다. 수동으로 git/build/restart를 호출할 수 없고 해서도 안 된다 (호스트 SSH 키는 컨테이너에 노출되지 않음). 대신 **deploy.flag 파일**을 작성하면 NanoClaw 호스트 프로세스가 5초 이내에 감지해서 모든 후속 작업을 대신 해준다.
+
+### 언제 deploy 필요
+
+| 수정한 파일 | git commit/push | npm run build | systemd restart |
+|---|---|---|---|
+| `groups/**/*.md` (CLAUDE.md, memories, daily-memories 등) | ✅ | ❌ | ❌ |
+| `groups/global/soul.md`, `user-context.md` | ✅ | ❌ | ❌ |
+| `scripts/seed-tasks.mjs` | ✅ | ❌ | 스케줄러 자동 폴링. 단 seed 재실행은 `node scripts/seed-tasks.mjs`로 수동 필요 |
+| `dashboard/**` (server.js, public/*) | ✅ | ❌ | ❌. pm2 재시작은 별도 (성호에게 안내) |
+| **`src/**/*.ts`** (NanoClaw 호스트 코드) | ✅ | **✅** | **✅** |
+| **`container/**` (Dockerfile, agent-runner, 스킬)** | ✅ | 컨테이너 재빌드 필요. 이건 deploy 플래그로는 못 함. 성호에게 안내 | ❌ |
+| `package.json` 의존성 변경 | ✅ | ✅ + `npm install` 필요. 성호에게 안내 | ✅ |
+
+즉 **대부분의 일반적 편집**은 deploy.flag 하나만 쓰면 끝난다. 복잡한 변경(컨테이너 재빌드, 의존성 설치)은 사용자에게 후속 조치를 한 줄로 안내하면 된다.
+
+### Deploy 플래그 쓰는 법
+
+파일 수정을 모두 마친 뒤, 마지막 단계로:
+
+\`\`\`bash
+echo "fix: scripts/seed-tasks.mjs 업무일지 prompt 섹션 보강" \\
+  > /workspace/project/data/ipc/deploy.flag
+\`\`\`
+
+플래그 파일의 **첫 줄 = commit 메시지**. 형식은 [Conventional Commits](https://www.conventionalcommits.org) 스타일 권장:
+
+- `fix: <짧은 요약>` — 버그/실수 수정
+- `feat: <짧은 요약>` — 새 기능 추가
+- `docs: <짧은 요약>` — 문서/CLAUDE.md/soul.md 수정
+- `chore: <짧은 요약>` — 잡일 (seed 재실행, 규칙 조정 등)
+
+메시지 본문은 간결하게. 한글/영어 혼용 OK.
+
+### NanoClaw 호스트가 하는 일 (watcher)
+
+1. `data/ipc/deploy.flag` 감지 (5초 polling)
+2. `git add -A`
+3. 스테이지된 변경이 있으면:
+   - `git -c user.email="bot@nanoclaw.local" -c user.name="NanoClaw-Bot" commit -m "<메시지>"`
+   - `git push origin main` ← 호스트 `~/.ssh/id_ed25519` 사용 (Pakkoc GitHub 계정)
+4. `npm run build` ← TypeScript → dist/ 재컴파일
+5. 결과를 `data/ipc/deploy.log` 에 append
+6. 성공 시 `process.exit(0)` → systemd가 자동 재시작 → 새 dist/index.js 로드
+
+즉 **deploy.flag 파일 한 번 쓰면 그 다음 커밋/푸시/빌드/재시작이 자동**으로 일어난다. 너의 컨테이너는 재시작 중에 잠깐 죽고, 다음 메시지가 올 때 새 NanoClaw 위에서 fresh container가 spawn된다.
+
+### 사용자에게 알리는 방법
+
+deploy.flag 작성 직후, 관리자 채널에 한 줄 알림:
+
+- "수정 완료 ✅ 커밋 + 빌드 + 재시작 진행 중이에요 (~30초)"
+- "src/ 수정이라 지금 NanoClaw 재시작이 자동으로 시작돼요. 잠깐만 기다려주세요 🐸"
+
+**절대 긴 설명 붙이지 말 것**. 변경 내용은 이미 파일 diff에 있고, commit message에도 있다.
+
+### 실패 시 진단
+
+만약 사용자가 나중에 "잘 됐어?"라고 물어보면, **네 세션은 재시작 후 새 컨테이너**라서 이전 메모리가 없다. 대신 deploy.log를 읽어 결과 확인:
+
+\`\`\`bash
+tail -30 /workspace/project/data/ipc/deploy.log
+\`\`\`
+
+- `END: deploy success` 라인이 있으면 성공
+- `END: aborted at <step>` 있으면 그 단계에서 실패 — 메시지 내용을 사용자에게 요약 보고
+- git push 실패의 가장 흔한 원인: **리모트에 이미 다른 커밋이 있음** (Windows에서 누가 push했음). 이 경우 사용자에게 "리모트에 새 커밋이 있어서 push가 실패했어요. 성호님이 Windows에서 \`git pull\` 한 뒤 다시 요청해주세요"로 안내.
+- npm run build 실패: TypeScript 에러. 에러 메시지를 사용자에게 보여주고, 어느 파일의 어느 줄인지 요약. 성호가 고쳐달라고 하면 다시 편집 + 새 deploy.flag.
+
+### Deploy 플래그 사용 예시
+
+**시나리오 1**: 성호가 "scripts/seed-tasks.mjs의 monthly-ranking prompt에서 이모지 TOP3를 TOP5로 바꿔줘"
+
+\`\`\`
+1. 화이트리스트 확인 → 성호 ✅
+2. Edit 도구로 scripts/seed-tasks.mjs 수정 (LIMIT 3 → LIMIT 5)
+3. 관리자에게 "수정 완료. 빌드/재시작은 불필요하지만 seed는 재실행이 필요해요"
+4. echo "chore(seed): monthly-ranking TOP3 → TOP5 확장" > /workspace/project/data/ipc/deploy.flag
+5. "커밋/푸시 중이에요. seed 재실행은 호스트에서: node scripts/seed-tasks.mjs (또는 제가 bash로 실행 가능)" 안내
+6. 필요시 bash로 cd /workspace/project && node scripts/seed-tasks.mjs 실행해서 DB 반영
+\`\`\`
+
+**시나리오 2**: 성호가 "src/channels/discord.ts에서 ticket 프리픽스 정규식 수정해줘"
+
+\`\`\`
+1. 화이트리스트 확인 ✅
+2. Edit 도구로 src/channels/discord.ts 수정
+3. echo "fix(discord): ticket prefix regex 오탐 교정" > /workspace/project/data/ipc/deploy.flag
+4. "수정 완료 ✅ src/ 수정이라 자동 빌드+재시작 진행 중 (~30초)" 한 줄 알림
+5. 이후 세션 종료 (컨테이너가 재시작됨)
+\`\`\`
+
+**시나리오 3**: 죨디가 "CLAUDE.md 수정해줘"
+
+\`\`\`
+1. 화이트리스트 확인 → 죨디 ❌
+2. "파일 수정 권한은 성호님과 요나새님께만 있어요. 두 분 중 한 분께 직접 요청해주시겠어요? 🐸"
+3. 끝. 우회 제안 금지.
+\`\`\`

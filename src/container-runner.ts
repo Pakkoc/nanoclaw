@@ -67,57 +67,60 @@ function buildVolumeMounts(
   const groupDir = resolveGroupFolderPath(group.folder);
 
   if (isMain) {
-    // Main gets the project root read-only. Writable paths the agent needs
-    // (store, group folder, IPC, .claude/) are mounted separately below.
-    // Read-only prevents the agent from modifying host application code
-    // (src/, dist/, package.json, etc.) which would bypass the sandbox
-    // entirely on next restart.
+    // Main gets the entire project root READ-WRITE. This allows the admin
+    // agent (whitelist-enforced at prompt level: 성호 + 요나새) to edit any
+    // NanoClaw file — src/, container/, scripts/, dashboard/, docs/, package
+    // files, group CLAUDE.md — from chat and trigger a full deploy via the
+    // data/ipc/deploy.flag watcher in src/index.ts.
+    //
+    // SECURITY: Non-main groups still don't see /workspace/project at all,
+    // so this doesn't weaken ticket/other-group isolation. Secret files are
+    // shadowed to /dev/null below so even main can't read them (they're
+    // injected via OneCLI gateway at request time, not through mounts).
+    //
+    // Prompt-level enforcement of who/what is expected to edit what lives in
+    // groups/discord_main/CLAUDE.md. OS-level is intentionally permissive for
+    // main because the trust boundary is Discord-channel admission to the
+    // admin channel (already limited to 4 people, further narrowed to 2 via
+    // the edit whitelist).
     mounts.push({
       hostPath: projectRoot,
       containerPath: '/workspace/project',
-      readonly: true,
+      readonly: false,
     });
 
-    // Shadow .env so the agent cannot read secrets from the mounted project root.
-    // Credentials are injected by the OneCLI gateway, never exposed to containers.
-    const envFile = path.join(projectRoot, '.env');
-    if (fs.existsSync(envFile)) {
-      mounts.push({
-        hostPath: '/dev/null',
-        containerPath: '/workspace/project/.env',
-        readonly: true,
-      });
+    // Shadow secret files to /dev/null. Even main cannot read these — they
+    // hold DB URLs, Discord bot tokens, Gmail app passwords, OAuth tokens.
+    // Credentials that the agent legitimately needs come through the OneCLI
+    // gateway as injected headers at request time, never as file contents.
+    const shadowSecrets = [
+      '.env',
+      'data/env/env',
+      'groups/global/tools.env',
+    ];
+    for (const rel of shadowSecrets) {
+      const hostPath = path.join(projectRoot, rel);
+      if (fs.existsSync(hostPath)) {
+        mounts.push({
+          hostPath: '/dev/null',
+          containerPath: `/workspace/project/${rel}`,
+          readonly: true,
+        });
+      }
     }
 
-    // Main gets writable access to the store (SQLite DB) so it can
-    // query and write to the database directly.
-    const storeDir = path.join(projectRoot, 'store');
-    mounts.push({
-      hostPath: storeDir,
-      containerPath: '/workspace/project/store',
-      readonly: false,
-    });
-
-    // Main also gets writable access to the entire groups/ folder via a
-    // nested rw mount that overrides the parent project ro mount. This lets
-    // the admin agent edit any group's CLAUDE.md, memories.md, daily-memories/
-    // etc. from chat (per-user whitelist enforced at prompt level in the
-    // discord_main/CLAUDE.md). NanoClaw source code (src/, container/, etc.)
-    // remains ro via the outer /workspace/project mount.
-    mounts.push({
-      hostPath: GROUPS_DIR,
-      containerPath: '/workspace/project/groups',
-      readonly: false,
-    });
-
-    // Main also gets its group folder as the working directory
+    // Main also gets its group folder as the working directory (cwd).
+    // This is also reachable via /workspace/project/groups/discord_main but
+    // the explicit /workspace/group path matches the non-main group's cwd
+    // convention so CLAUDE.md rules stay consistent.
     mounts.push({
       hostPath: groupDir,
       containerPath: '/workspace/group',
       readonly: false,
     });
 
-    // Global memory directory — writable for main so it can update shared context
+    // Global memory directory — also reachable via /workspace/project/groups/
+    // global, but exposed at /workspace/global for consistency with non-main.
     const globalDir = path.join(GROUPS_DIR, 'global');
     if (fs.existsSync(globalDir)) {
       mounts.push({
@@ -125,6 +128,15 @@ function buildVolumeMounts(
         containerPath: '/workspace/global',
         readonly: false,
       });
+      // Shadow tools.env on this path too (same file, different mount).
+      const toolsEnvHost = path.join(globalDir, 'tools.env');
+      if (fs.existsSync(toolsEnvHost)) {
+        mounts.push({
+          hostPath: '/dev/null',
+          containerPath: '/workspace/global/tools.env',
+          readonly: true,
+        });
+      }
     }
   } else {
     // Other groups only get their own folder

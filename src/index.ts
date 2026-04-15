@@ -1,3 +1,4 @@
+import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -568,6 +569,144 @@ function ensureContainerSystemRunning(): void {
   cleanupOrphans();
 }
 
+/**
+ * Deploy flag watcher — polls data/ipc/deploy.flag every 5 seconds. When the
+ * flag appears, runs the full deploy pipeline on the host:
+ *   1. git add -A
+ *   2. git commit (if there are staged changes) with bot identity
+ *   3. git push origin main (uses host ~/.ssh/id_ed25519)
+ *   4. npm run build
+ *   5. process.exit(0) → systemd restarts NanoClaw with the new dist
+ *
+ * The agent inside the admin (main) container triggers a deploy by writing
+ * the desired commit message into /workspace/project/data/ipc/deploy.flag.
+ * The SSH private key stays on the host — the agent never sees it, so it can
+ * trigger pushes without credential exposure.
+ *
+ * All step results (success + stderr slices) are appended to
+ * data/ipc/deploy.log so the next agent session can verify outcomes.
+ */
+function startDeployWatcher(): void {
+  const projectRoot = process.cwd();
+  const ipcDir = path.join(projectRoot, 'data', 'ipc');
+  const flagPath = path.join(ipcDir, 'deploy.flag');
+  const logPath = path.join(ipcDir, 'deploy.log');
+  fs.mkdirSync(ipcDir, { recursive: true });
+
+  const POLL_MS = 5000;
+
+  const appendLog = (line: string): void => {
+    try {
+      fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${line}\n`);
+    } catch (err) {
+      logger.warn({ err }, 'deploy.log append failed');
+    }
+  };
+
+  const runStep = (
+    label: string,
+    cmd: string,
+  ): { ok: boolean; out: string } => {
+    try {
+      const out = execSync(cmd, {
+        cwd: projectRoot,
+        encoding: 'utf-8',
+        timeout: 180000,
+        shell: '/bin/bash',
+      });
+      const lastLines = out.trim().split('\n').slice(-3).join(' | ');
+      appendLog(`  [${label}] OK ${lastLines}`);
+      return { ok: true, out };
+    } catch (err) {
+      const e = err as { stderr?: Buffer; stdout?: Buffer; message?: string };
+      const msg = String(
+        e?.stderr || e?.stdout || e?.message || err,
+      ).slice(0, 500);
+      appendLog(`  [${label}] FAIL ${msg}`);
+      logger.error({ step: label, err: msg }, 'Deploy step failed');
+      return { ok: false, out: msg };
+    }
+  };
+
+  const processDeploy = (): void => {
+    if (!fs.existsSync(flagPath)) return;
+
+    let message: string;
+    try {
+      message = fs.readFileSync(flagPath, 'utf-8').trim() || 'automated deploy';
+    } catch (err) {
+      logger.warn({ err }, 'Failed to read deploy.flag');
+      return;
+    }
+    logger.info({ message }, 'Deploy flag detected, starting deploy');
+    appendLog(`BEGIN: ${message}`);
+
+    // Remove flag immediately so a failed/stuck step doesn't loop
+    try {
+      fs.unlinkSync(flagPath);
+    } catch (err) {
+      logger.warn({ err }, 'Failed to unlink deploy.flag');
+    }
+
+    // 1. Stage everything
+    const add = runStep('git-add', 'git add -A');
+    if (!add.ok) {
+      appendLog('END: aborted at git add');
+      return;
+    }
+
+    // 2. Check for staged changes
+    const status = runStep('git-status', 'git diff --cached --name-only');
+    if (status.ok && !status.out.trim()) {
+      appendLog(
+        '  [git-status] no staged changes — skipping commit/push, doing build only',
+      );
+    } else {
+      // 3. Commit with bot identity
+      const escaped = message.replace(/["\\$`]/g, '\\$&');
+      const commit = runStep(
+        'git-commit',
+        `git -c user.email="bot@nanoclaw.local" -c user.name="NanoClaw-Bot" commit -m "${escaped}"`,
+      );
+      if (!commit.ok) {
+        appendLog('END: aborted at git commit');
+        return;
+      }
+
+      // 4. Push to origin/main (uses host SSH key)
+      const push = runStep('git-push', 'git push origin main');
+      if (!push.ok) {
+        appendLog(
+          'END: aborted at git push — local commit saved, host intervention needed',
+        );
+        return;
+      }
+    }
+
+    // 5. Rebuild TypeScript
+    const build = runStep('npm-build', 'npm run build');
+    if (!build.ok) {
+      appendLog('END: aborted at npm run build');
+      return;
+    }
+
+    // 6. Exit for systemd to restart with the new dist
+    appendLog(`END: deploy success — exiting for systemd restart`);
+    logger.info('Deploy successful, exiting for systemd restart in 500ms');
+    setTimeout(() => process.exit(0), 500);
+  };
+
+  setInterval(() => {
+    try {
+      processDeploy();
+    } catch (err) {
+      logger.error({ err }, 'Deploy watcher tick failed');
+    }
+  }, POLL_MS);
+
+  logger.info({ flagPath }, 'Deploy watcher started');
+}
+
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initDatabase();
@@ -748,6 +887,7 @@ async function main(): Promise<void> {
     },
   });
   startSessionCleanup();
+  startDeployWatcher();
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
