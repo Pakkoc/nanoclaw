@@ -123,3 +123,5 @@ Each NanoClaw group gets its own OneCLI agent identity. This allows different cr
 │  • No real credentials in environment or filesystem              │
 └──────────────────────────────────────────────────────────────────┘
 ```
+
+<!-- pull-watcher verification 2026-04-16 -->
