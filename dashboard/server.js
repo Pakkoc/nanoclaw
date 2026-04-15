@@ -1138,3 +1138,5 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`DB: ${NANOCLAW_DB}`);
   console.log(`인증 사용자: ${DASHBOARD_USER}`);
 });
+
+// deploy hook verification 2026-04-15T22:00:35+09:00
