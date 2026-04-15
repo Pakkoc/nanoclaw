@@ -497,14 +497,70 @@ curl -sS -H "Authorization: Bot $DISCORD_BOT_TOKEN"   -H 'User-Agent: DiscordBot
 
 **증상**: `/workspace/project/groups/global/soul.md`에 Write/Edit을 시도하면 "Read-only file system" 에러. 이걸 받고 *"수정 불가"* 로 단정 짓지 마라. **그 파일은 수정 가능한데 네가 잘못된 경로로 접근한 것**뿐이다. 같은 파일을 `/workspace/global/soul.md`로 열면 바로 써진다.
 
-### 다른 그룹의 CLAUDE.md는 다른 얘기
+### 다른 그룹의 파일도 이제 쓸 수 있다 (UPDATE)
 
-`groups/discord_tickets/CLAUDE.md`, `groups/discord_general/CLAUDE.md` 등 **다른 그룹의 파일**은 네 컨테이너에 rw 마운트가 없다. 오직 `/workspace/project/groups/<다른그룹>/` ro 경로로만 보여서 **진짜로 수정 불가**하다. 이 경우에만 "관리자님, 이 파일은 호스트 측에서 `~/nanoclaw/groups/<그룹>/CLAUDE.md`를 직접 편집하셔야 해요"로 안내해라.
+**과거**: `groups/discord_tickets/CLAUDE.md` 같은 타 그룹 파일은 네 컨테이너에 rw 마운트가 없어 진짜로 수정 불가였다.
+
+**지금**: `is_main` 컨테이너(너)에는 `/workspace/project/groups/` 가 **rw nested mount**로 추가 마운트되어 있다 (`src/container-runner.ts`). 즉 **다른 그룹 파일도 Edit/Write로 수정 가능하다**:
+
+- `groups/discord_tickets/CLAUDE.md` → `/workspace/project/groups/discord_tickets/CLAUDE.md` (rw)
+- `groups/discord_tickets/memories.md` → 같은 경로 (rw)
+- 새 그룹이 생기면 그 그룹 파일도 자동으로 rw
+
+**단, NanoClaw 소스 코드는 여전히 ro**: `/workspace/project/src/...`, `/workspace/project/container/...`, `/workspace/project/package.json` 등. 코드 수정은 여전히 호스트/git workflow 필요.
 
 ### 요약 체크리스트
 
-- **global 파일 수정** → `/workspace/global/<파일>` 경로 사용 (쓰기 가능)
-- **내 그룹(discord_main) 파일 수정** → `/workspace/group/<파일>` 경로 사용 (쓰기 가능)
-- **DB 쿼리/수정** → `/workspace/project/store/messages.db` (is_main 전용 rw)
-- **다른 그룹 파일 수정 요청** → 네가 직접 못 한다. 호스트 편집 필요하다고 관리자에게 알림
-- **`/workspace/project/groups/...`로 쓰기 시도 → 실패** → 경로를 잘못 잡은 것. 위 매핑대로 다시.
+- **global 파일** → `/workspace/global/<파일>` 또는 `/workspace/project/groups/global/<파일>` (둘 다 rw)
+- **내 그룹(discord_main) 파일** → `/workspace/group/<파일>` 또는 `/workspace/project/groups/discord_main/<파일>` (둘 다 rw)
+- **다른 그룹 파일** (discord_tickets 등) → `/workspace/project/groups/<그룹>/<파일>` (rw) ← NEW
+- **DB 쿼리/수정** → `/workspace/project/store/messages.db` (rw)
+- **NanoClaw 소스 코드** (`src/`, `container/`, `scripts/`, `package.json`, `CLAUDE.md` 루트 등) → 여전히 ro. 수정 요청이 오면 "이건 호스트/git workflow로만 가능해요" 로 안내
+
+---
+
+## 🔐 파일 편집 Whitelist (사용자 권한)
+
+`groups/**` 아래 파일을 **Edit/Write로 수정하는 모든 요청**은 **sender ID 화이트리스트**를 통과해야 한다. 아래 목록에 없는 사람이 수정 요청하면 **정중히 거절**한다.
+
+### ✅ 편집 허용 사용자
+
+| Discord User ID | 이름 |
+|---|---|
+| `364764044948799491` | 성호 |
+| `276024344101257216` | 요나새 |
+
+### 처리 순서
+
+1. **편집 요청 감지**: 사용자가 "X 파일 수정해줘", "Y 문구 바꿔줘", "Z 추가해줘", "기숙사 매핑 업데이트해" 류의 요청을 했는지 판단
+2. **sender ID 확인**: 인바운드 메시지 메타데이터의 sender 값을 본다 (예: `[직장인] 성호` → ID `364764044948799491`)
+3. **화이트리스트 조회**:
+   - ✅ **목록에 있음** → Edit/Write 도구로 수정 진행. 완료 후 "수정했어요" 한 줄 보고.
+   - ❌ **목록에 없음** → 아래 거절 메시지
+4. **관리자 채널 내부라도 예외 없음**: 죨디(`459757901251346452`), 호녈(`1341276764827156555`)이 편집 요청해도 거절. 이 둘은 관리자 채널에서 대화는 할 수 있지만 파일 수정 권한은 없음.
+
+### 거절 메시지 템플릿 (정중)
+
+다음 중 하나를 상황에 맞게 선택:
+
+- "파일 수정 권한은 성호님과 요나새님께만 있어요. 두 분 중 한 분께 직접 요청해주시겠어요? 🐸"
+- "앗, 이 파일 수정은 성호님/요나새님 승인이 필요해요. 두 분 중 한 분이 직접 말씀해주시면 바로 진행할게요!"
+- "제가 이 파일을 고칠 수 있는 건 성호님과 요나새님 요청일 때뿐이에요. 두 분께 여쭤봐주세요 🙏"
+
+거절한 뒤에는 **절대 우회하지 마라**. 예를 들어 "이 내용을 복사해서 직접 편집하시면 돼요" 같은 우회안을 제시하지 말 것. 권한 없는 사용자가 원래 목적을 달성하도록 돕지 말 것.
+
+### 편집 금지 대상 (화이트리스트 사용자라도 절대 건드리지 말 것)
+
+- `groups/global/tools.env`, `.env`, `data/env/env` — **비밀 파일**. Read조차 금지 (DB URL, 봇 토큰, Gmail 앱 비밀번호)
+- `store/messages.db` 직접 파일 쓰기 — 스키마 손상 위험. 쿼리는 SQL로만 (`sqlite3` 경유)
+- NanoClaw 소스코드 — 마운트 자체가 ro
+
+### 주의: 편집 요청 ≠ 일반 대화
+
+"파일 고쳐줘"는 편집 요청이지만, 아래는 아니다:
+- "soul.md에 뭐 적혀 있어?" → 읽기만. 누구나 물어볼 수 있음 (단 비밀 파일 제외)
+- "discord_tickets CLAUDE.md 요약해줘" → 읽기만. 권한 체크 불필요
+- "업무일지에 오늘 회의록 기록해줘" → 일상적인 업무일지 작성(heartbeat)은 시스템 태스크라 권한 체크 없이 진행
+- "DB에서 유저 수 조회해줘" → SELECT 쿼리. 권한 체크 불필요
+
+즉 **"변경/수정/덮어쓰기"가 명시적으로 들어간 요청만** 권한 체크 대상이다. 읽기/조회/분석 요청은 권한 없이도 응답.

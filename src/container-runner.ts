@@ -98,6 +98,18 @@ function buildVolumeMounts(
       readonly: false,
     });
 
+    // Main also gets writable access to the entire groups/ folder via a
+    // nested rw mount that overrides the parent project ro mount. This lets
+    // the admin agent edit any group's CLAUDE.md, memories.md, daily-memories/
+    // etc. from chat (per-user whitelist enforced at prompt level in the
+    // discord_main/CLAUDE.md). NanoClaw source code (src/, container/, etc.)
+    // remains ro via the outer /workspace/project mount.
+    mounts.push({
+      hostPath: GROUPS_DIR,
+      containerPath: '/workspace/project/groups',
+      readonly: false,
+    });
+
     // Main also gets its group folder as the working directory
     mounts.push({
       hostPath: groupDir,
