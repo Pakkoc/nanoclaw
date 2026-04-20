@@ -55,8 +55,12 @@ export class DiscordChannel implements Channel {
     });
 
     this.client.on(Events.MessageCreate, async (message: Message) => {
-      // Ignore bot messages (including own)
-      if (message.author.bot) return;
+      // 다른 봇(music-bot, lavalink 등) 메시지는 무시하되, 자기 자신이 API로
+      // 직접 보낸 메시지는 저장해야 한다. container skill(create-diary.sh,
+      // post-discord.sh)들이 Discord API를 직접 호출해서 ticket 채널에 완료
+      // 메시지를 보내는데, 이걸 DB에 남겨야 업무일지 크론이 집계 가능.
+      const myBotId = this.client?.user?.id;
+      if (message.author.bot && message.author.id !== myBotId) return;
 
       const channelId = message.channelId;
       const realJid = `dc:${channelId}`;
@@ -187,6 +191,11 @@ export class DiscordChannel implements Channel {
         return;
       }
 
+      // 자기 봇이 API로 직접 보낸 메시지는 is_from_me + is_bot_message 둘 다
+      // 표시. is_bot_message=1이면 getNewMessages/getMessagesSince에서 제외되어
+      // 에이전트를 깨우지 않지만, 업무일지 크론의 raw SQL 쿼리에는 그대로 잡힘.
+      const isSelfBot = message.author.id === this.client?.user?.id;
+
       // Deliver message — startMessageLoop() will pick it up
       this.opts.onMessage(chatJid, {
         id: msgId,
@@ -195,7 +204,8 @@ export class DiscordChannel implements Channel {
         sender_name: senderName,
         content,
         timestamp,
-        is_from_me: false,
+        is_from_me: isSelfBot,
+        is_bot_message: isSelfBot,
       });
 
       logger.info(

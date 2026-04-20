@@ -74,9 +74,9 @@ function buildVolumeMounts(
     // data/ipc/deploy.flag watcher in src/index.ts.
     //
     // SECURITY: Non-main groups still don't see /workspace/project at all,
-    // so this doesn't weaken ticket/other-group isolation. Secret files are
-    // shadowed to /dev/null below so even main can't read them (they're
-    // injected via OneCLI gateway at request time, not through mounts).
+    // so this doesn't weaken ticket/other-group isolation. Main (사장님) has
+    // full access including tools.env; non-main groups get tools.env shadowed
+    // to /dev/null (see else branch below).
     //
     // Prompt-level enforcement of who/what is expected to edit what lives in
     // groups/discord_main/CLAUDE.md. OS-level is intentionally permissive for
@@ -89,25 +89,10 @@ function buildVolumeMounts(
       readonly: false,
     });
 
-    // Shadow secret files to /dev/null. Even main cannot read these — they
-    // hold DB URLs, Discord bot tokens, Gmail app passwords, OAuth tokens.
-    // Credentials that the agent legitimately needs come through the OneCLI
-    // gateway as injected headers at request time, never as file contents.
-    const shadowSecrets = [
-      '.env',
-      'data/env/env',
-      'groups/global/tools.env',
-    ];
-    for (const rel of shadowSecrets) {
-      const hostPath = path.join(projectRoot, rel);
-      if (fs.existsSync(hostPath)) {
-        mounts.push({
-          hostPath: '/dev/null',
-          containerPath: `/workspace/project/${rel}`,
-          readonly: true,
-        });
-      }
-    }
+    // Main (사장님) has full access including tools.env — container skills
+    // like post-discord, db-query, diary-create need to read DISCORD_BOT_TOKEN
+    // and DB_URL_READONLY directly from the file. Other groups still get
+    // shadow mounts below (see else branch).
 
     // Main also gets its group folder as the working directory (cwd).
     // This is also reachable via /workspace/project/groups/discord_main but
@@ -121,6 +106,7 @@ function buildVolumeMounts(
 
     // Global memory directory — also reachable via /workspace/project/groups/
     // global, but exposed at /workspace/global for consistency with non-main.
+    // Main can read tools.env directly (no shadow) — container skills need it.
     const globalDir = path.join(GROUPS_DIR, 'global');
     if (fs.existsSync(globalDir)) {
       mounts.push({
@@ -128,15 +114,6 @@ function buildVolumeMounts(
         containerPath: '/workspace/global',
         readonly: false,
       });
-      // Shadow tools.env on this path too (same file, different mount).
-      const toolsEnvHost = path.join(globalDir, 'tools.env');
-      if (fs.existsSync(toolsEnvHost)) {
-        mounts.push({
-          hostPath: '/dev/null',
-          containerPath: '/workspace/global/tools.env',
-          readonly: true,
-        });
-      }
     }
   } else {
     // Other groups only get their own folder
@@ -147,7 +124,9 @@ function buildVolumeMounts(
     });
 
     // Global memory directory (read-only for non-main)
-    // Only directory mounts are supported, not file mounts
+    // 직원(non-main) 컨테이너도 자기 역할에 필요한 tools.env를 읽을 수
+    // 있어야 한다. 예: 티켓 그룹의 create-diary.sh는 DISCORD_BOT_TOKEN을
+    // tools.env에서 로드한다. 읽기 전용이므로 수정은 불가.
     const globalDir = path.join(GROUPS_DIR, 'global');
     if (fs.existsSync(globalDir)) {
       mounts.push({
