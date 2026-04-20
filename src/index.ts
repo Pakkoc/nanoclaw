@@ -619,9 +619,10 @@ function startDeployWatcher(): void {
       return { ok: true, out };
     } catch (err) {
       const e = err as { stderr?: Buffer; stdout?: Buffer; message?: string };
-      const msg = String(
-        e?.stderr || e?.stdout || e?.message || err,
-      ).slice(0, 500);
+      const msg = String(e?.stderr || e?.stdout || e?.message || err).slice(
+        0,
+        500,
+      );
       appendLog(`  [${label}] FAIL ${msg}`);
       logger.error({ step: label, err: msg }, 'Deploy step failed');
       return { ok: false, out: msg };
