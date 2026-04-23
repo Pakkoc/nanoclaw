@@ -481,7 +481,14 @@ async function startMessageLoop(): Promise<void> {
           }
         }
 
-        for (const [chatJid, groupMessages] of messagesByGroup) {
+        // Process main group first, then others
+        const sortedEntries = [...messagesByGroup.entries()].sort(([jidA], [jidB]) => {
+          const isMainA = registeredGroups[jidA]?.isMain ? 1 : 0;
+          const isMainB = registeredGroups[jidB]?.isMain ? 1 : 0;
+          return isMainB - isMainA;
+        });
+
+        for (const [chatJid, groupMessages] of sortedEntries) {
           const group = registeredGroups[chatJid];
           if (!group) continue;
 
