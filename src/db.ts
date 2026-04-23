@@ -395,12 +395,11 @@ export function getMessagesSince(
  * Count how many bot responses were sent in a chat today (local timezone).
  * Used to enforce per-channel daily response limits at the host level.
  *
- * Only counts messages where is_from_me=1 AND sender_name matches the
- * assistant name, to exclude system error messages (e.g. "Not logged in").
+ * is_from_me=1 is sufficient — all such messages are from the bot.
  */
 export function countTodayBotResponses(
   chatJid: string,
-  assistantName: string,
+  _assistantName: string,
   timezone: string,
 ): number {
   // SQLite datetime with offset converts UTC timestamp to local date
@@ -411,16 +410,14 @@ export function countTodayBotResponses(
     offsetHours = sign * parseInt(offsetMatch[1].replace(/[+-]/, ''), 10);
   }
   const offsetStr = `${offsetHours > 0 ? '+' : ''}${offsetHours} hours`;
-  // Use LIKE so that decorated names like "✦부엉이✦" also match "부엉이".
   const row = db
     .prepare(
       `SELECT COUNT(*) as cnt FROM messages
        WHERE chat_jid = ?
          AND is_from_me = 1
-         AND sender_name LIKE ?
          AND date(timestamp, ?) = date('now', ?)`,
     )
-    .get(chatJid, `%${assistantName}%`, offsetStr, offsetStr) as { cnt: number };
+    .get(chatJid, offsetStr, offsetStr) as { cnt: number };
   return row.cnt;
 }
 
