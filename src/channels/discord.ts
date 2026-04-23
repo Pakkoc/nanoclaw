@@ -223,7 +223,12 @@ export class DiscordChannel implements Channel {
       );
 
       // Only deliver full message for registered groups
-      const group = this.opts.registeredGroups()[chatJid];
+      const allGroups = this.opts.registeredGroups();
+      const group = allGroups[chatJid];
+      logger.info(
+        { chatJid, groupFound: !!group, allJids: Object.keys(allGroups) },
+        '[DIARY-DEBUG2] group lookup',
+      );
       if (!group) {
         logger.debug(
           { chatJid, chatName },
