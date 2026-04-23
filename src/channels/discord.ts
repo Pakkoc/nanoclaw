@@ -103,6 +103,17 @@ export class DiscordChannel implements Channel {
         !isTicketCatchall &&
         message.guild !== null &&
         DIARY_CATEGORY_IDS.has(diaryParentId);
+      logger.info(
+        {
+          channelId,
+          diaryParentId,
+          isDiaryCatchall,
+          isTicketCatchall,
+          channelType: message.channel.type,
+          guildPresent: !!message.guild,
+        },
+        '[DIARY-DEBUG] channel info',
+      );
       if (isDiaryCatchall) {
         chatJid = DIARY_VIRTUAL_JID;
       }
