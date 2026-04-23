@@ -68,7 +68,10 @@ function escapeRegex(str: string): string {
 }
 
 export function buildTriggerPattern(trigger: string): RegExp {
-  return new RegExp(`^${escapeRegex(trigger.trim())}\\b`, 'i');
+  // Use (?=\s|$) instead of \b so Korean/non-ASCII triggers match correctly.
+  // \b only fires at ASCII word-character boundaries; Korean chars are \W,
+  // so "@부엉이\b" never matches even when followed by a space.
+  return new RegExp(`^${escapeRegex(trigger.trim())}(?=\\s|$)`, 'i');
 }
 
 export const DEFAULT_TRIGGER = `@${ASSISTANT_NAME}`;
