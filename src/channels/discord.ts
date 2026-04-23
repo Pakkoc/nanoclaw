@@ -97,7 +97,7 @@ export class DiscordChannel implements Channel {
       // Diary category catchall: route messages from dormitory diary channels
       // to the virtual diary group so a single agent handles all diary chats.
       const diaryParentId = message.guild
-        ? (message.channel as TextChannel).parentId ?? ''
+        ? ((message.channel as TextChannel).parentId ?? '')
         : '';
       const isDiaryCatchall =
         !isTicketCatchall &&
@@ -193,7 +193,8 @@ export class DiscordChannel implements Channel {
 
       // Tag diary catchall messages with their origin channel.
       if (isDiaryCatchall) {
-        const diaryChannelName = (message.channel as TextChannel).name ?? channelId;
+        const diaryChannelName =
+          (message.channel as TextChannel).name ?? channelId;
         content = `[diary-channel:${channelId} #${diaryChannelName}] ${content}`;
       }
 
