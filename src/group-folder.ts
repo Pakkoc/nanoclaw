@@ -35,10 +35,18 @@ export function resolveGroupFolderPath(folder: string): string {
   return groupPath;
 }
 
-export function resolveGroupIpcPath(folder: string): string {
-  assertValidGroupFolder(folder);
+/**
+ * Resolve IPC directory path for a group by its JID.
+ * JIDs like "dc:1228360623960887327" are sanitized to safe filenames.
+ * Each JID gets a unique IPC namespace, enabling parallel processing
+ * of multiple channels that share the same group folder.
+ */
+export function resolveGroupIpcPath(jid: string): string {
+  // Sanitize JID into a filesystem-safe name: replace non-alphanumeric chars with '_'
+  const safeName = jid.replace(/[^A-Za-z0-9_-]/g, '_');
+  if (!safeName) throw new Error(`Cannot resolve IPC path for empty JID`);
   const ipcBaseDir = path.resolve(DATA_DIR, 'ipc');
-  const ipcPath = path.resolve(ipcBaseDir, folder);
+  const ipcPath = path.resolve(ipcBaseDir, safeName);
   ensureWithinBase(ipcBaseDir, ipcPath);
   return ipcPath;
 }

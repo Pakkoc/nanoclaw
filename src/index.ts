@@ -143,7 +143,7 @@ function saveState(): void {
   setRouterState('last_agent_timestamp', JSON.stringify(lastAgentTimestamp));
 }
 
-function registerGroup(jid: string, group: RegisteredGroup): void {
+function registerGroup(jid: string, group: RegisteredGroup, templateFolder?: string): void {
   let groupDir: string;
   try {
     groupDir = resolveGroupFolderPath(group.folder);
@@ -163,13 +163,11 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
 
   // Copy CLAUDE.md template into the new group folder so agents have
   // identity and instructions from the first run.  (Fixes #1391)
+  // templateFolder overrides the default ('main' for isMain, 'global' otherwise)
   const groupMdFile = path.join(groupDir, 'CLAUDE.md');
   if (!fs.existsSync(groupMdFile)) {
-    const templateFile = path.join(
-      GROUPS_DIR,
-      group.isMain ? 'main' : 'global',
-      'CLAUDE.md',
-    );
+    const resolvedTemplate = templateFolder ?? (group.isMain ? 'main' : 'global');
+    const templateFile = path.join(GROUPS_DIR, resolvedTemplate, 'CLAUDE.md');
     if (fs.existsSync(templateFile)) {
       let content = fs.readFileSync(templateFile, 'utf-8');
       if (ASSISTANT_NAME !== 'Andy') {
@@ -177,7 +175,7 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
         content = content.replace(/You are Andy/g, `You are ${ASSISTANT_NAME}`);
       }
       fs.writeFileSync(groupMdFile, content);
-      logger.info({ folder: group.folder }, 'Created CLAUDE.md from template');
+      logger.info({ folder: group.folder, templateFolder: resolvedTemplate }, 'Created CLAUDE.md from template');
     }
   }
 
@@ -1017,6 +1015,9 @@ async function main(): Promise<void> {
       isGroup?: boolean,
     ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
     registeredGroups: () => registeredGroups,
+    registerGroup: (jid: string, group: RegisteredGroup, templateFolder?: string) =>
+      registerGroup(jid, group, templateFolder),
+    defaultTrigger: () => DEFAULT_TRIGGER,
   };
 
   // Create and connect all registered channels.
