@@ -36,6 +36,7 @@ import {
   getAllSessions,
   deleteSession,
   getAllTasks,
+  countTodayBotResponses,
   getLastBotMessageTimestamp,
   getMessagesSince,
   getNewMessages,
@@ -75,6 +76,11 @@ let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
+
+/** Folders whose channels have a hard daily response limit (enforced at host level). */
+const DIARY_FOLDER_PREFIX = 'diaries/';
+/** Maximum bot responses per day for diary channels. */
+const DIARY_DAILY_LIMIT = 3;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
@@ -272,6 +278,24 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
     );
     if (!hasTrigger) return true;
+  }
+
+  // Hard daily response limit for diary channels — enforced at host level so
+  // parallel containers cannot race past it.  GroupQueue serialises calls per
+  // JID, so the count read here is always up-to-date.
+  if (group.folder.startsWith(DIARY_FOLDER_PREFIX)) {
+    const todayCount = countTodayBotResponses(chatJid, ASSISTANT_NAME, TIMEZONE);
+    if (todayCount >= DIARY_DAILY_LIMIT) {
+      // Silently advance cursor so these messages are not retried.
+      lastAgentTimestamp[chatJid] =
+        missedMessages[missedMessages.length - 1].timestamp;
+      saveState();
+      logger.info(
+        { group: group.name, todayCount, limit: DIARY_DAILY_LIMIT },
+        'Daily diary limit reached — skipping response',
+      );
+      return true;
+    }
   }
 
   const prompt = formatMessages(missedMessages, TIMEZONE);
