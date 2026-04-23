@@ -243,21 +243,24 @@ export class DiscordChannel implements Channel {
       const isSelfBot = message.author.id === this.client?.user?.id;
 
       // Deliver message — startMessageLoop() will pick it up
-      this.opts.onMessage(chatJid, {
-        id: msgId,
-        chat_jid: chatJid,
-        sender,
-        sender_name: senderName,
-        content,
-        timestamp,
-        is_from_me: isSelfBot,
-        is_bot_message: isSelfBot,
-      });
-
-      logger.info(
-        { chatJid, chatName, sender: senderName },
-        'Discord message stored',
-      );
+      try {
+        this.opts.onMessage(chatJid, {
+          id: msgId,
+          chat_jid: chatJid,
+          sender,
+          sender_name: senderName,
+          content,
+          timestamp,
+          is_from_me: isSelfBot,
+          is_bot_message: isSelfBot,
+        });
+        logger.info(
+          { chatJid, chatName, sender: senderName },
+          'Discord message stored',
+        );
+      } catch (err) {
+        logger.error({ chatJid, err }, '[DIARY-DEBUG3] onMessage threw error');
+      }
     });
 
     // Handle errors gracefully
