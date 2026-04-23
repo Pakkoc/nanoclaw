@@ -194,6 +194,22 @@ function registerGroup(
     { jid, name: group.name, folder: group.folder },
     'Group registered',
   );
+
+  // Backfill: if there are already-stored messages that arrived before this
+  // group was registered (e.g. the very first message in a new diary channel),
+  // enqueue them immediately so they are not silently dropped.
+  const pending = getMessagesSince(
+    jid,
+    getOrRecoverCursor(jid),
+    ASSISTANT_NAME,
+  );
+  if (pending.length > 0) {
+    logger.info(
+      { jid, name: group.name, pendingCount: pending.length },
+      'Backfilling messages received before group registration',
+    );
+    queue.enqueueMessageCheck(jid);
+  }
 }
 
 /**
@@ -482,11 +498,13 @@ async function startMessageLoop(): Promise<void> {
         }
 
         // Process main group first, then others
-        const sortedEntries = [...messagesByGroup.entries()].sort(([jidA], [jidB]) => {
-          const isMainA = registeredGroups[jidA]?.isMain ? 1 : 0;
-          const isMainB = registeredGroups[jidB]?.isMain ? 1 : 0;
-          return isMainB - isMainA;
-        });
+        const sortedEntries = [...messagesByGroup.entries()].sort(
+          ([jidA], [jidB]) => {
+            const isMainA = registeredGroups[jidA]?.isMain ? 1 : 0;
+            const isMainB = registeredGroups[jidB]?.isMain ? 1 : 0;
+            return isMainB - isMainA;
+          },
+        );
 
         for (const [chatJid, groupMessages] of sortedEntries) {
           const group = registeredGroups[chatJid];
