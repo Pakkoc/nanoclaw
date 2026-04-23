@@ -982,7 +982,14 @@ async function main(): Promise<void> {
   // Channel callbacks (shared by all channels)
   const channelOpts = {
     onMessage: (chatJid: string, msg: NewMessage) => {
-      logger.info({ chatJid, sender: msg.sender_name, contentPreview: msg.content.slice(0, 60) }, '[DIARY-DEBUG4] onMessage called');
+      logger.info(
+        {
+          chatJid,
+          sender: msg.sender_name,
+          contentPreview: msg.content.slice(0, 60),
+        },
+        '[DIARY-DEBUG4] onMessage called',
+      );
       // Remote control commands — intercept before storage
       const trimmed = msg.content.trim();
       if (trimmed === '/remote-control' || trimmed === '/remote-control-end') {
@@ -1008,7 +1015,13 @@ async function main(): Promise<void> {
           return;
         }
       }
-      storeMessage(msg);
+      logger.info({ chatJid }, '[DIARY-DEBUG5] before storeMessage');
+      try {
+        storeMessage(msg);
+        logger.info({ chatJid }, '[DIARY-DEBUG6] storeMessage succeeded');
+      } catch (storeErr) {
+        logger.error({ chatJid, err: storeErr }, '[DIARY-DEBUG6] storeMessage threw');
+      }
     },
     onChatMetadata: (
       chatJid: string,
