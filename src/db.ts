@@ -411,15 +411,16 @@ export function countTodayBotResponses(
     offsetHours = sign * parseInt(offsetMatch[1].replace(/[+-]/, ''), 10);
   }
   const offsetStr = `${offsetHours > 0 ? '+' : ''}${offsetHours} hours`;
+  // Use LIKE so that decorated names like "✦부엉이✦" also match "부엉이".
   const row = db
     .prepare(
       `SELECT COUNT(*) as cnt FROM messages
        WHERE chat_jid = ?
          AND is_from_me = 1
-         AND sender_name = ?
+         AND sender_name LIKE ?
          AND date(timestamp, ?) = date('now', ?)`,
     )
-    .get(chatJid, assistantName, offsetStr, offsetStr) as { cnt: number };
+    .get(chatJid, `%${assistantName}%`, offsetStr, offsetStr) as { cnt: number };
   return row.cnt;
 }
 
