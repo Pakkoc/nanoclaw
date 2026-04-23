@@ -284,7 +284,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // parallel containers cannot race past it.  GroupQueue serialises calls per
   // JID, so the count read here is always up-to-date.
   if (group.folder.startsWith(DIARY_FOLDER_PREFIX)) {
-    const todayCount = countTodayBotResponses(chatJid, ASSISTANT_NAME, TIMEZONE);
+    const todayCount = countTodayBotResponses(
+      chatJid,
+      ASSISTANT_NAME,
+      TIMEZONE,
+    );
     if (todayCount >= DIARY_DAILY_LIMIT) {
       // Silently advance cursor so these messages are not retried.
       lastAgentTimestamp[chatJid] =
