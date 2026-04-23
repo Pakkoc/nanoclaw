@@ -1,9 +1,11 @@
 import {
+  ChannelType,
   Client,
   Events,
   GatewayIntentBits,
   Message,
   TextChannel,
+  ThreadChannel,
 } from 'discord.js';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
@@ -90,11 +92,24 @@ export class DiscordChannel implements Channel {
         ticketChannel.parentId === this.ticketCategoryId &&
         (ticketChannel.name?.startsWith('ticket-') ?? false);
 
-      // Diary channel detection: any channel under a diary category is
-      // auto-registered as a per-channel group using the discord_diary template.
-      const diaryParentId = message.guild
-        ? ((message.channel as TextChannel).parentId ?? '')
-        : '';
+      // Thread detection: public/private threads inside diary channels.
+      const isThread =
+        message.channel.type === ChannelType.PublicThread ||
+        message.channel.type === ChannelType.PrivateThread;
+
+      // Diary channel detection: any channel (or thread inside a channel)
+      // under a diary category is auto-registered as a per-channel group.
+      // For threads, check the grandparent (thread → channel → category).
+      let diaryParentId = '';
+      let diaryParentChannelId = channelId; // folder key: use parent channel ID for threads
+      if (isThread) {
+        const thread = message.channel as ThreadChannel;
+        const parentChannel = thread.parent as TextChannel | null;
+        diaryParentId = parentChannel?.parentId ?? '';
+        diaryParentChannelId = thread.parentId ?? channelId;
+      } else if (message.guild) {
+        diaryParentId = (message.channel as TextChannel).parentId ?? '';
+      }
       const isDiaryChannel =
         !isTicketChannel &&
         message.guild !== null &&
@@ -226,7 +241,10 @@ export class DiscordChannel implements Channel {
             realJid,
             {
               name: `기숙사 다이어리 #${diaryChannelName}`,
-              folder: `diaries/discord_diary_ch${channelId}`,
+              // Threads share their parent channel's folder so they inherit
+              // the same CLAUDE.md and context. The JID (realJid) stays as
+              // the thread's own channel ID so replies go to the thread.
+              folder: `diaries/discord_diary_ch${diaryParentChannelId}`,
               trigger: this.opts.defaultTrigger(),
               added_at: new Date().toISOString(),
               requiresTrigger: true,
