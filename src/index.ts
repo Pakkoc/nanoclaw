@@ -1020,7 +1020,10 @@ async function main(): Promise<void> {
         storeMessage(msg);
         logger.info({ chatJid }, '[DIARY-DEBUG6] storeMessage succeeded');
       } catch (storeErr) {
-        logger.error({ chatJid, err: storeErr }, '[DIARY-DEBUG6] storeMessage threw');
+        logger.error(
+          { chatJid, err: storeErr },
+          '[DIARY-DEBUG6] storeMessage threw',
+        );
       }
     },
     onChatMetadata: (

@@ -99,8 +99,16 @@ export class DiscordChannel implements Channel {
       const diaryParentId = message.guild
         ? ((message.channel as TextChannel).parentId ?? '')
         : '';
+      // Only catchall when the bot is explicitly @mentioned — avoids routing
+      // every diary message through the virtual group unnecessarily.
+      const isBotMentionedForDiary = this.client?.user
+        ? message.mentions.users.has(this.client.user.id) ||
+          message.content.includes(`<@${this.client.user.id}>`) ||
+          message.content.includes(`<@!${this.client.user.id}>`)
+        : false;
       const isDiaryCatchall =
         !isTicketCatchall &&
+        isBotMentionedForDiary &&
         message.guild !== null &&
         DIARY_CATEGORY_IDS.has(diaryParentId);
       logger.info(
