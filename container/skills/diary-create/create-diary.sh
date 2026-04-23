@@ -78,7 +78,7 @@ send_message() {
 }
 
 echo "[1/8] 대기 메시지 발송..."
-send_message "$TICKET_CHANNEL_ID" "잠시만 기다려주세요! 🐸"
+send_message "$TICKET_CHANNEL_ID" "잠시만 기다려주세요! 💛"
 
 echo "[2/8] 사용자 정보 조회..."
 MEMBER_JSON=$(api_get "/guilds/$GUILD_ID/members/$USER_ID")
@@ -159,7 +159,7 @@ send_message "$NEW_CHANNEL_ID" "<@$USER_ID>"
 
 echo "[8/8] 완료 메시지 발송..."
 COMPLETE_MSG="다 만들어졌습니다! 🎉
-<#$NEW_CHANNEL_ID>
+# <#$NEW_CHANNEL_ID>
 열공하세요!"
 send_message "$TICKET_CHANNEL_ID" "$COMPLETE_MSG"
 
