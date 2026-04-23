@@ -111,16 +111,14 @@ export class DiscordChannel implements Channel {
         isBotMentionedForDiary &&
         message.guild !== null &&
         DIARY_CATEGORY_IDS.has(diaryParentId);
-      logger.info(
+      logger.debug(
         {
           channelId,
           diaryParentId,
           isDiaryCatchall,
           isTicketCatchall,
-          channelType: message.channel.type,
-          guildPresent: !!message.guild,
         },
-        '[DIARY-DEBUG] channel info',
+        'Discord channel routing',
       );
       if (isDiaryCatchall) {
         chatJid = DIARY_VIRTUAL_JID;
@@ -218,8 +216,8 @@ export class DiscordChannel implements Channel {
       }
 
       // Store chat metadata for discovery — always use the real channel JID
-      // even when routing through a virtual group (ticket catchall). This keeps
-      // each individual ticket channel visible in the chats table / dashboard
+      // even when routing through a virtual group (ticket/diary catchall). This keeps
+      // each individual channel visible in the chats table / dashboard
       // while the virtual group still owns message processing.
       const isGroup = message.guild !== null;
       this.opts.onChatMetadata(
@@ -230,13 +228,18 @@ export class DiscordChannel implements Channel {
         isGroup,
       );
 
+      // For virtual routing (ticket/diary catchall), also ensure the virtual JID
+      // has a chats entry. storeMessage requires chat_jid to exist in the chats
+      // table (foreign key constraint), so we must upsert the virtual row first.
+      if (chatJid !== realJid) {
+        const virtualName =
+          chatJid === TICKET_VIRTUAL_JID ? '마법사관학교 티켓' : '기숙사 다이어리';
+        this.opts.onChatMetadata(chatJid, timestamp, virtualName, 'discord', true);
+      }
+
       // Only deliver full message for registered groups
       const allGroups = this.opts.registeredGroups();
       const group = allGroups[chatJid];
-      logger.info(
-        { chatJid, groupFound: !!group, allJids: Object.keys(allGroups) },
-        '[DIARY-DEBUG2] group lookup',
-      );
       if (!group) {
         logger.debug(
           { chatJid, chatName },
@@ -251,24 +254,20 @@ export class DiscordChannel implements Channel {
       const isSelfBot = message.author.id === this.client?.user?.id;
 
       // Deliver message — startMessageLoop() will pick it up
-      try {
-        this.opts.onMessage(chatJid, {
-          id: msgId,
-          chat_jid: chatJid,
-          sender,
-          sender_name: senderName,
-          content,
-          timestamp,
-          is_from_me: isSelfBot,
-          is_bot_message: isSelfBot,
-        });
-        logger.info(
-          { chatJid, chatName, sender: senderName },
-          'Discord message stored',
-        );
-      } catch (err) {
-        logger.error({ chatJid, err }, '[DIARY-DEBUG3] onMessage threw error');
-      }
+      this.opts.onMessage(chatJid, {
+        id: msgId,
+        chat_jid: chatJid,
+        sender,
+        sender_name: senderName,
+        content,
+        timestamp,
+        is_from_me: isSelfBot,
+        is_bot_message: isSelfBot,
+      });
+      logger.info(
+        { chatJid, chatName, sender: senderName },
+        'Discord message stored',
+      );
     });
 
     // Handle errors gracefully
