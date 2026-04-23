@@ -226,7 +226,7 @@ export class DiscordChannel implements Channel {
             realJid,
             {
               name: `기숙사 다이어리 #${diaryChannelName}`,
-              folder: `discord_diary_ch${channelId}`,
+              folder: `diaries/discord_diary_ch${channelId}`,
               trigger: this.opts.defaultTrigger(),
               added_at: new Date().toISOString(),
               requiresTrigger: true,
