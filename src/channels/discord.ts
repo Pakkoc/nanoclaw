@@ -21,7 +21,11 @@ export interface DiscordChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
-  registerGroup: (jid: string, group: RegisteredGroup, templateFolder?: string) => void;
+  registerGroup: (
+    jid: string,
+    group: RegisteredGroup,
+    templateFolder?: string,
+  ) => void;
   defaultTrigger: () => string;
 }
 
