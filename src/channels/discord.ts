@@ -27,6 +27,16 @@ export interface DiscordChannelOpts {
 // channels under DISCORD_TICKET_CATEGORY_ID route here.
 const TICKET_VIRTUAL_JID = 'dc:tickets';
 
+// Virtual JID for diary category catchall — all messages from dormitory
+// diary channels route here when the bot is @mentioned.
+const DIARY_VIRTUAL_JID = 'dc:diary';
+const DIARY_CATEGORY_IDS = new Set([
+  '1236979261529657426', // 🩷 소용돌이 기숙사
+  '1236979345529114664', // 💜 노블레빗 기숙사
+  '1236979439879848028', // 🩵 볼리베어 기숙사
+  '1386697214910529687', // 🩶 펭도리야 기숙사
+]);
+
 export class DiscordChannel implements Channel {
   name = 'discord';
 
@@ -82,6 +92,19 @@ export class DiscordChannel implements Channel {
         (ticketChannel.name?.startsWith('ticket-') ?? false);
       if (isTicketCatchall) {
         chatJid = TICKET_VIRTUAL_JID;
+      }
+
+      // Diary category catchall: route messages from dormitory diary channels
+      // to the virtual diary group so a single agent handles all diary chats.
+      const diaryParentId = message.guild
+        ? (message.channel as TextChannel).parentId ?? ''
+        : '';
+      const isDiaryCatchall =
+        !isTicketCatchall &&
+        message.guild !== null &&
+        DIARY_CATEGORY_IDS.has(diaryParentId);
+      if (isDiaryCatchall) {
+        chatJid = DIARY_VIRTUAL_JID;
       }
       const senderName =
         message.member?.displayName ||
@@ -166,6 +189,12 @@ export class DiscordChannel implements Channel {
       // so the tag is always the leading prefix the agent sees.
       if (isTicketCatchall) {
         content = `[ticket-channel:${channelId} #${ticketChannel!.name}] ${content}`;
+      }
+
+      // Tag diary catchall messages with their origin channel.
+      if (isDiaryCatchall) {
+        const diaryChannelName = (message.channel as TextChannel).name ?? channelId;
+        content = `[diary-channel:${channelId} #${diaryChannelName}] ${content}`;
       }
 
       // Store chat metadata for discovery — always use the real channel JID
@@ -258,6 +287,20 @@ export class DiscordChannel implements Channel {
       text = text.slice(match[0].length);
     }
 
+    // Diary catchall: same pattern — agent must prefix reply with [reply-channel:<id>].
+    if (jid === DIARY_VIRTUAL_JID) {
+      const match = text.match(/^\[reply-channel:(\d+)\]\s*/);
+      if (!match) {
+        logger.warn(
+          { jid, textPreview: text.slice(0, 120) },
+          'Diary reply missing [reply-channel:<id>] prefix — dropping',
+        );
+        return;
+      }
+      jid = `dc:${match[1]}`;
+      text = text.slice(match[0].length);
+    }
+
     try {
       const channelId = jid.replace(/^dc:/, '');
       const channel = await this.client.channels.fetch(channelId);
@@ -305,6 +348,7 @@ export class DiscordChannel implements Channel {
     // Can't target typing indicator at the virtual ticket group since
     // we don't know the real channel until the agent's reply is parsed.
     if (jid === TICKET_VIRTUAL_JID) return;
+    if (jid === DIARY_VIRTUAL_JID) return;
     try {
       const channelId = jid.replace(/^dc:/, '');
       const channel = await this.client.channels.fetch(channelId);
