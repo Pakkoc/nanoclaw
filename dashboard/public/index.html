@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>🐸 개굴이 NanoClaw 대시보드</title>
+  <title>🦉 부엉이 NanoClaw 대시보드</title>
   <link rel="stylesheet" href="style.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
   <header>
-    <h1>🐸 개굴이 NanoClaw 대시보드</h1>
+    <h1>🦉 부엉이 NanoClaw 대시보드</h1>
     <div class="header-actions">
       <button id="refresh-btn" onclick="loadAll()">🔄 새로고침</button>
       <span id="last-updated"></span>
@@ -17,7 +17,7 @@
   </header>
 
   <nav class="tabs">
-    <button class="tab active" data-section="today">🐸 오늘의 개굴이</button>
+    <button class="tab active" data-section="today">🦉 오늘의 부엉이</button>
     <button class="tab" data-section="nanoclaw">🤖 NanoClaw</button>
     <button class="tab" data-section="stats">📊 DB 통계</button>
     <button class="tab" data-section="ops">📚 운영 문서</button>
@@ -26,9 +26,9 @@
   </nav>
 
   <main>
-    <!-- Section 1: 오늘의 개굴이 -->
+    <!-- Section 1: 오늘의 부엉이 -->
     <section id="section-today" class="section active">
-      <h2>🐸 오늘의 개굴이</h2>
+      <h2>🦉 오늘의 부엉이</h2>
 
       <div class="two-col">
         <div>
@@ -73,7 +73,7 @@
 
       <h3 style="margin-top:24px">🏷️ 등록된 그룹 (registered_groups)</h3>
       <div class="card">
-        <p class="subtle">개굴이가 응답하는 채팅방. <code>is_main</code>은 트리거 없이 모든 메시지에 응답하는 메인 그룹.</p>
+        <p class="subtle">부엉이가 응답하는 채팅방. <code>is_main</code>은 트리거 없이 모든 메시지에 응답하는 메인 그룹.</p>
         <div id="registered-groups">
           <div class="loading">불러오는 중...</div>
         </div>

@@ -2,7 +2,7 @@
 
 Personal Claude assistant. See [README.md](README.md) for philosophy and setup. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for architecture decisions.
 
-## ⚠️ Fork 전용 배포 정보 (개굴이 운영)
+## ⚠️ Fork 전용 배포 정보 (부엉이 운영)
 
 이 fork는 **Windows 개발 머신이 아닌 미니 PC에서 운영**된다. Windows는 코드 편집/커밋 전용, 실제 서비스는 미니 PC에서 돈다.
 
@@ -17,9 +17,9 @@ Personal Claude assistant. See [README.md](README.md) for philosophy and setup. 
 
 ### 봇 정체성 & 등록된 그룹
 
-- **이름**: 개굴이 (개구리 AI, 마법사관학교✦STUDY Discord 서버)
+- **이름**: 부엉이 (노란 부엉이 AI, 마법사관학교✦STUDY Discord 서버)
 - **관리자 4명**: 성호(`364764044948799491`), 죨디(`459757901251346452`), 요나새(`276024344101257216`), 호녈(`1341276764827156555`)
-- **`discord_main`** (is_main) — 🐸개굴이-업무전달 `dc:1489283292489449585`. 관리자 전용, 트리거 불필요
+- **`discord_main`** (is_main) — 🦉부엉이-업무전달 `dc:1489283292489449585`. 관리자 전용, 트리거 불필요
 - **`discord_tickets`** (non-main, non-trigger) — 가상 JID `dc:tickets`. 카테고리 `1227530533567991881` 하위 `ticket-*` 채널 캐치올. 인바운드 프리픽스 `[ticket-channel:<id> #ticket-XXXX]`, 아웃바운드 프리픽스 `[reply-channel:<id>]` 필수 (`src/channels/discord.ts`에서 파싱)
 - 운영 규칙은 각 그룹 폴더의 `CLAUDE.md`에 있다. 에이전트 동작을 바꾸려면 그쪽을 편집할 것
 - 정체성은 `groups/global/soul.md`, 관리자 정보는 `groups/global/user-context.md`

@@ -1,4 +1,4 @@
-// 개굴이 NanoClaw 대시보드 — 프런트엔드 로직
+// 부엉이 NanoClaw 대시보드 — 프런트엔드 로직
 
 const charts = {};
 
@@ -67,7 +67,7 @@ async function fetchJson(url) {
   return res.json();
 }
 
-// ===== Section 1: 오늘의 개굴이 =====
+// ===== Section 1: 오늘의 부엉이 =====
 async function loadRecentWork() {
   try {
     const data = await fetchJson('/api/recent-work?days=7');

@@ -1,4 +1,4 @@
-// 개굴이 NanoClaw 대시보드 — Express 백엔드
+// 부엉이 NanoClaw 대시보드 — Express 백엔드
 // 포트 18790, Basic auth, 읽기 전용
 //
 // OpenClaw 시절 대시보드에서 포팅. 모든 경로를 ~/nanoclaw/ 로 재설정하고
@@ -1017,14 +1017,14 @@ function buildReportHtml(date, content, stats) {
 <body>
   <div class="container">
     <div class="header">
-      <h1>🐸 개굴이 업무일지</h1>
+      <h1>🦉 부엉이 업무일지</h1>
       <div class="date">${date}</div>
     </div>
     <div class="body">${body}</div>
     <hr class="divider">
     ${statsHtml}
     <div class="footer">
-      마법사관학교 개굴이 NanoClaw 대시보드 · 자동 발송
+      마법사관학교 부엉이 NanoClaw 대시보드 · 자동 발송
     </div>
   </div>
 </body>
@@ -1077,10 +1077,10 @@ async function sendTodayReport(opts = {}) {
     throw new Error(`업무일지 파일이 없음: ${report.date}`);
   }
   const subjectPrefix = specificDate
-    ? '[개굴이][재발송]'
-    : (report.is_fallback ? '[개굴이][이전]' : '[개굴이]');
+    ? '[부엉이][재발송]'
+    : (report.is_fallback ? '[부엉이][이전]' : '[부엉이]');
   const info = await mailTransporter.sendMail({
-    from: `"개굴이 🐸" <${GMAIL_USER}>`,
+    from: `"부엉이 🦉" <${GMAIL_USER}>`,
     to: REPORT_RECIPIENT,
     subject: `${subjectPrefix} ${report.date} 업무일지`,
     html: report.html,
@@ -1130,7 +1130,7 @@ if (mailTransporter) {
 
 // ===== 시작 =====
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`개굴이 NanoClaw 대시보드 시작: http://0.0.0.0:${PORT}`);
+  console.log(`부엉이 NanoClaw 대시보드 시작: http://0.0.0.0:${PORT}`);
   console.log(`NanoClaw 루트: ${NANOCLAW_ROOT}`);
   console.log(`그룹: ${GROUPS_DIR}`);
   console.log(`업무일지: ${MEMORY_DIR}`);

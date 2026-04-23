@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // scripts/seed-tasks.mjs
 //
-// Seeds (or re-seeds) the OpenClaw-migrated scheduled_tasks for 개굴이.
+// Seeds (or re-seeds) the OpenClaw-migrated scheduled_tasks for 부엉이.
 // Single source of truth for the 3 operational cron tasks:
 //   - 월간 랭킹 공지 (매월 1일 9시)
 //   - 업무일지 작성 heartbeat (매일 9시)
@@ -26,7 +26,7 @@ const TZ = process.env.TZ || 'Asia/Seoul';
 // ─────────────── 대상 그룹 / 채널 ───────────────
 
 const GROUP_FOLDER = 'discord_main';
-const CHAT_JID = 'dc:1489283292489449585';     // 🐸개굴이-업무전달
+const CHAT_JID = 'dc:1489283292489449585';     // 🦉부엉이-업무전달
 const ADMIN_CHANNEL = '1489283292489449585';
 const NOTICE_CHANNEL = '1231132864867860511';    // 월간 랭킹 공지 대상
 
@@ -83,7 +83,7 @@ SQL
 \`\`\`
 
 - 각 티켓 채널별로 그룹핑 (content 앞에 \`[ticket-channel:<CHANNEL_ID> #ticket-XXXX]\` 프리픽스가 붙어있음 — 그 안에서 ticket ID 추출)
-- is_from_me=0 = 사용자 요청, is_from_me=1 = 개굴이(티켓 그룹 세션) 응답
+- is_from_me=0 = 사용자 요청, is_from_me=1 = 부엉이(티켓 그룹 세션) 응답
 - 요약 포맷 예: \`ticket-0776 (4lpaka): 다이어리 생성 요청 → 소용돌이 기숙사 채널 #<닉네임> 생성 완료\`
 - 에러/미해결 티켓이 있으면 별도 표기
 

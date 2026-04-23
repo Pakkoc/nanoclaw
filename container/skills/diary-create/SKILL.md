@@ -28,7 +28,7 @@ bash /home/node/.claude/skills/diary-create/create-diary.sh <user_id> <ticket_ch
 
 8단계 자동 실행:
 
-1. 티켓 채널에 "잠시만 기다려주세요! 🐸" 즉시 발송
+1. 티켓 채널에 "잠시만 기다려주세요! 🦉" 즉시 발송
 2. Discord API로 사용자 정보 조회 (역할 ID, 닉네임)
 3. 사용자의 기숙사 역할 매칭 (4개 기숙사 중)
 4. 닉네임에서 `[직장인]`, `[대학생]` 등 대괄호 부분 제거
