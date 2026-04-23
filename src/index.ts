@@ -982,6 +982,7 @@ async function main(): Promise<void> {
   // Channel callbacks (shared by all channels)
   const channelOpts = {
     onMessage: (chatJid: string, msg: NewMessage) => {
+      logger.info({ chatJid, sender: msg.sender_name, contentPreview: msg.content.slice(0, 60) }, '[DIARY-DEBUG4] onMessage called');
       // Remote control commands — intercept before storage
       const trimmed = msg.content.trim();
       if (trimmed === '/remote-control' || trimmed === '/remote-control-end') {
