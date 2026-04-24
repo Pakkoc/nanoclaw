@@ -157,7 +157,36 @@ api_put "/channels/$NEW_CHANNEL_ID/permissions/$USER_ID" "$PERM_PAYLOAD" > /dev/
 
 send_message "$NEW_CHANNEL_ID" "<@$USER_ID>"
 
-echo "[8/8] 완료 메시지 발송..."
+echo "[8/9] NanoClaw 그룹 등록 및 CLAUDE.md 생성..."
+node -e "
+const Database = require('/workspace/project/node_modules/better-sqlite3');
+const db = new Database('/workspace/project/store/messages.db');
+const now = new Date().toISOString();
+db.prepare(\`
+  INSERT OR IGNORE INTO registered_groups
+  (jid, name, folder, trigger_pattern, requires_trigger, added_at)
+  VALUES (?, ?, ?, ?, 1, ?)
+\`).run(
+  'dc:' + process.argv[1],
+  '기숙사 다이어리 #' + process.argv[2],
+  'diaries/discord_diary_ch' + process.argv[1],
+  '@부엉이',
+  now
+);
+console.log('등록 완료: dc:' + process.argv[1]);
+" "$NEW_CHANNEL_ID" "$CHANNEL_NAME"
+
+TEMPLATE_CLAUDE="/workspace/project/groups/diaries/discord_diary_ch1472986187294703726/CLAUDE.md"
+TARGET_DIR="/workspace/project/groups/diaries/discord_diary_ch${NEW_CHANNEL_ID}"
+mkdir -p "$TARGET_DIR"
+if [ -f "$TEMPLATE_CLAUDE" ]; then
+  cp "$TEMPLATE_CLAUDE" "$TARGET_DIR/CLAUDE.md"
+  echo "CLAUDE.md 생성 완료: $TARGET_DIR"
+else
+  echo "WARNING: 템플릿 CLAUDE.md 없음, 건너뜀" >&2
+fi
+
+echo "[9/9] 완료 메시지 발송..."
 COMPLETE_MSG="다 만들어졌습니다! 🎉
 # <#$NEW_CHANNEL_ID>
 열공하세요!"

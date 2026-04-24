@@ -566,7 +566,11 @@ async function startMessageLoop(): Promise<void> {
           // processGroupMessages, but applied here for the piping path
           // (active container already running).
           if (group.folder.startsWith(DIARY_FOLDER_PREFIX)) {
-            const todayCount = countTodayBotResponses(chatJid, ASSISTANT_NAME, TIMEZONE);
+            const todayCount = countTodayBotResponses(
+              chatJid,
+              ASSISTANT_NAME,
+              TIMEZONE,
+            );
             if (todayCount >= DIARY_DAILY_LIMIT) {
               lastAgentTimestamp[chatJid] =
                 groupMessages[groupMessages.length - 1].timestamp;
