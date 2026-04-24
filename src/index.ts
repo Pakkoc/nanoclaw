@@ -562,6 +562,23 @@ async function startMessageLoop(): Promise<void> {
             if (!hasTrigger) continue;
           }
 
+          // Hard daily limit check for diary channels — same guard as in
+          // processGroupMessages, but applied here for the piping path
+          // (active container already running).
+          if (group.folder.startsWith(DIARY_FOLDER_PREFIX)) {
+            const todayCount = countTodayBotResponses(chatJid, ASSISTANT_NAME, TIMEZONE);
+            if (todayCount >= DIARY_DAILY_LIMIT) {
+              lastAgentTimestamp[chatJid] =
+                groupMessages[groupMessages.length - 1].timestamp;
+              saveState();
+              logger.info(
+                { group: group.name, todayCount, limit: DIARY_DAILY_LIMIT },
+                'Daily diary limit reached (pipe path) — skipping',
+              );
+              continue;
+            }
+          }
+
           // Pull all messages since lastAgentTimestamp so non-trigger
           // context that accumulated between triggers is included.
           const allPending = getMessagesSince(
