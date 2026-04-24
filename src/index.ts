@@ -129,9 +129,24 @@ function loadState(): void {
  */
 function getOrRecoverCursor(chatJid: string): string {
   const existing = lastAgentTimestamp[chatJid];
+  const botTs = getLastBotMessageTimestamp(chatJid, ASSISTANT_NAME);
+
+  if (existing && botTs && existing > botTs) {
+    // Cursor is ahead of the last bot reply — this means we advanced the
+    // cursor (e.g. in the pipe path or diary-limit skip) but the agent never
+    // actually sent a response. Roll back to the last bot reply so those
+    // missed messages get re-processed.
+    logger.warn(
+      { chatJid, cursor: existing, lastBotReply: botTs },
+      'Cursor ahead of last bot reply — rolling back to prevent missed messages',
+    );
+    lastAgentTimestamp[chatJid] = botTs;
+    saveState();
+    return botTs;
+  }
+
   if (existing) return existing;
 
-  const botTs = getLastBotMessageTimestamp(chatJid, ASSISTANT_NAME);
   if (botTs) {
     logger.info(
       { chatJid, recoveredFrom: botTs },
