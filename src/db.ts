@@ -402,14 +402,26 @@ export function countTodayBotResponses(
   _assistantName: string,
   timezone: string,
 ): number {
-  // SQLite datetime with offset converts UTC timestamp to local date
-  const offsetMatch = timezone.match(/([+-]\d{1,2}):?(\d{2})?$/);
+  // Resolve UTC offset hours from either "+09:00" style or IANA timezone name
   let offsetHours = 0;
-  if (offsetMatch) {
-    const sign = offsetMatch[0].startsWith('-') ? -1 : 1;
-    offsetHours = sign * parseInt(offsetMatch[1].replace(/[+-]/, ''), 10);
+  const numericMatch = timezone.match(/([+-]\d{1,2}):?(\d{2})?$/);
+  if (numericMatch) {
+    // e.g. "+09:00", "UTC+9"
+    const sign = numericMatch[0].startsWith('-') ? -1 : 1;
+    offsetHours = sign * parseInt(numericMatch[1].replace(/[+-]/, ''), 10);
+  } else {
+    // IANA timezone name (e.g. "Asia/Seoul") — derive offset via Intl
+    try {
+      const now = new Date();
+      const utcMs = now.getTime();
+      const localStr = now.toLocaleString('en-US', { timeZone: timezone });
+      const localMs = new Date(localStr).getTime();
+      offsetHours = Math.round((localMs - utcMs) / 3_600_000);
+    } catch {
+      offsetHours = 0;
+    }
   }
-  const offsetStr = `${offsetHours > 0 ? '+' : ''}${offsetHours} hours`;
+  const offsetStr = `${offsetHours >= 0 ? '+' : ''}${offsetHours} hours`;
   const row = db
     .prepare(
       `SELECT COUNT(*) as cnt FROM messages
