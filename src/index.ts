@@ -300,7 +300,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // JID, so the count read here is always up-to-date.
   if (group.folder.startsWith(DIARY_FOLDER_PREFIX)) {
     const todayCount = countTodayBotResponses(
-      chatJid,
+      group.folder,
       ASSISTANT_NAME,
       TIMEZONE,
     );
@@ -310,7 +310,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         missedMessages[missedMessages.length - 1].timestamp;
       saveState();
       logger.info(
-        { group: group.name, todayCount, limit: DIARY_DAILY_LIMIT },
+        { group: group.name, folder: group.folder, todayCount, limit: DIARY_DAILY_LIMIT },
         'Daily diary limit reached — skipping response',
       );
       return true;
@@ -582,7 +582,7 @@ async function startMessageLoop(): Promise<void> {
           // (active container already running).
           if (group.folder.startsWith(DIARY_FOLDER_PREFIX)) {
             const todayCount = countTodayBotResponses(
-              chatJid,
+              group.folder,
               ASSISTANT_NAME,
               TIMEZONE,
             );
@@ -591,7 +591,7 @@ async function startMessageLoop(): Promise<void> {
                 groupMessages[groupMessages.length - 1].timestamp;
               saveState();
               logger.info(
-                { group: group.name, todayCount, limit: DIARY_DAILY_LIMIT },
+                { group: group.name, folder: group.folder, todayCount, limit: DIARY_DAILY_LIMIT },
                 'Daily diary limit reached (pipe path) — skipping',
               );
               continue;

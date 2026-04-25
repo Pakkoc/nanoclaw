@@ -392,13 +392,15 @@ export function getMessagesSince(
 }
 
 /**
- * Count how many bot responses were sent in a chat today (local timezone).
- * Used to enforce per-channel daily response limits at the host level.
+ * Count how many bot responses were sent today (local timezone) across every
+ * jid registered to the given group folder. Diary threads register as separate
+ * jids that share their parent channel's folder, so counting by folder makes
+ * "main + all threads" a single per-person bucket.
  *
  * is_from_me=1 is sufficient — all such messages are from the bot.
  */
 export function countTodayBotResponses(
-  chatJid: string,
+  folder: string,
   _assistantName: string,
   timezone: string,
 ): number {
@@ -428,11 +430,11 @@ export function countTodayBotResponses(
   const row = db
     .prepare(
       `SELECT COUNT(*) as cnt FROM messages
-       WHERE chat_jid = ?
+       WHERE chat_jid IN (SELECT jid FROM registered_groups WHERE folder = ?)
          AND is_from_me = 1
          AND date(timestamp, ?) = date('now', ?)`,
     )
-    .get(chatJid, offsetStr, offsetStr) as { cnt: number };
+    .get(folder, offsetStr, offsetStr) as { cnt: number };
   return row.cnt;
 }
 
