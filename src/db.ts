@@ -76,13 +76,52 @@ function createSchema(database: Database.Database): void {
     CREATE TABLE IF NOT EXISTS registered_groups (
       jid TEXT PRIMARY KEY,
       name TEXT NOT NULL,
-      folder TEXT NOT NULL UNIQUE,
+      folder TEXT NOT NULL,
       trigger_pattern TEXT NOT NULL,
       added_at TEXT NOT NULL,
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
     );
   `);
+
+  // Migration: drop UNIQUE constraint on registered_groups.folder if present.
+  // Diary channels share one folder across the parent text channel and all
+  // its threads (so daily-limit counting is per-person, not per-jid). The
+  // original schema had folder UNIQUE which silently REPLACE-deleted earlier
+  // rows when a sibling jid with the same folder was inserted, causing
+  // chronic registration loss.
+  try {
+    const tableInfo = database
+      .prepare(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='registered_groups'",
+      )
+      .get() as { sql?: string } | undefined;
+    if (tableInfo?.sql?.includes('folder TEXT NOT NULL UNIQUE')) {
+      database.exec(`
+        BEGIN;
+        CREATE TABLE registered_groups_new (
+          jid TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          folder TEXT NOT NULL,
+          trigger_pattern TEXT NOT NULL,
+          added_at TEXT NOT NULL,
+          container_config TEXT,
+          requires_trigger INTEGER DEFAULT 1,
+          is_main INTEGER DEFAULT 0
+        );
+        INSERT INTO registered_groups_new (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main)
+          SELECT jid, name, folder, trigger_pattern, added_at, container_config,
+                 COALESCE(requires_trigger, 1),
+                 COALESCE(is_main, 0)
+          FROM registered_groups;
+        DROP TABLE registered_groups;
+        ALTER TABLE registered_groups_new RENAME TO registered_groups;
+        COMMIT;
+      `);
+    }
+  } catch {
+    /* migration not needed or already applied */
+  }
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
   try {
