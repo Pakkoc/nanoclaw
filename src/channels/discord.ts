@@ -423,65 +423,42 @@ export class DiscordChannel implements Channel {
     if (!this.client) return;
     let walked = 0;
     let registered = 0;
-    let failed = 0;
+    let guildsScanned = 0;
 
-    for (const categoryId of DIARY_CATEGORY_IDS) {
-      let category;
+    // Iterate every guild the bot is in and force-fetch its full channel
+    // listing. Use the fetch return value (Collection) directly instead of
+    // guild.channels.cache so we don't depend on cache being fully populated.
+    for (const [, guild] of this.client.guilds.cache) {
+      let allChannels;
       try {
-        category = await this.client.channels.fetch(categoryId, {
-          force: true,
-        });
+        allChannels = await guild.channels.fetch();
       } catch (err) {
         logger.warn(
-          { categoryId, err: String(err) },
-          'Diary category fetch failed during walk',
+          { guildId: guild.id, err: String(err) },
+          'guild.channels.fetch failed',
         );
-        failed++;
         continue;
       }
-      if (!category || category.type !== ChannelType.GuildCategory) continue;
+      guildsScanned++;
 
-      // Collect text channels under this category. Discord.js' guild channel
-      // cache is lazy — idle channels (no recent activity) may be missing
-      // until guild.channels.fetch() is called. Force-populate first so
-      // every diary-category channel is visible regardless of recent traffic.
-      const guild = (
-        category as {
-          guild?: {
-            channels: {
-              fetch: () => Promise<unknown>;
-              cache: Map<string, unknown>;
-            };
-          };
-        }
-      ).guild;
-      if (!guild) continue;
-      try {
-        await guild.channels.fetch();
-      } catch (err) {
-        logger.warn(
-          { categoryId, err: String(err) },
-          'Guild channels fetch failed during walk',
-        );
-      }
-      const textChannels: TextChannel[] = [];
-      for (const ch of guild.channels.cache.values()) {
-        const c = ch as TextChannel;
-        if (c.parentId === categoryId && c.type === ChannelType.GuildText) {
-          textChannels.push(c);
-        }
+      const diaryTextChannels: TextChannel[] = [];
+      for (const [, ch] of allChannels) {
+        if (!ch) continue;
+        if (ch.type !== ChannelType.GuildText) continue;
+        if (!DIARY_CATEGORY_IDS.has(ch.parentId ?? '')) continue;
+        diaryTextChannels.push(ch as TextChannel);
       }
 
-      for (const channel of textChannels) {
+      for (const channel of diaryTextChannels) {
         walked++;
         if (await this.ensureGroupRegistered(`dc:${channel.id}`)) registered++;
 
-        // Active threads
         try {
           const active = await channel.threads.fetchActive();
           for (const [, thread] of active.threads) {
             walked++;
-            if (await this.ensureGroupRegistered(`dc:${thread.id}`)) registered++;
+            if (await this.ensureGroupRegistered(`dc:${thread.id}`))
+              registered++;
           }
         } catch (err) {
           logger.debug(
@@ -490,12 +467,12 @@ export class DiscordChannel implements Channel {
           );
         }
 
-        // Archived threads (paginated; one page covers ~100 most recent)
         try {
           const archived = await channel.threads.fetchArchived({ limit: 100 });
           for (const [, thread] of archived.threads) {
             walked++;
-            if (await this.ensureGroupRegistered(`dc:${thread.id}`)) registered++;
+            if (await this.ensureGroupRegistered(`dc:${thread.id}`))
+              registered++;
           }
         } catch (err) {
           logger.debug(
@@ -507,7 +484,7 @@ export class DiscordChannel implements Channel {
     }
 
     logger.info(
-      { walked, registered, categoriesFailed: failed },
+      { guildsScanned, walked, registered },
       'Diary category walk complete',
     );
   }
