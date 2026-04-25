@@ -174,14 +174,15 @@ db.prepare(\`
   now
 );
 console.log('등록 완료: dc:' + process.argv[1]);
-" "$NEW_CHANNEL_ID" "$CHANNEL_NAME"
+" "$NEW_CHANNEL_ID" "$CHANNEL_NAME" || echo "WARNING: 그룹 등록 실패 (이미 등록됐거나 권한 문제) — 계속 진행" >&2
 
 TEMPLATE_CLAUDE="/workspace/project/groups/diaries/discord_diary_ch1472986187294703726/CLAUDE.md"
 TARGET_DIR="/workspace/project/groups/diaries/discord_diary_ch${NEW_CHANNEL_ID}"
-mkdir -p "$TARGET_DIR"
+mkdir -p "$TARGET_DIR" || true
 if [ -f "$TEMPLATE_CLAUDE" ]; then
-  cp "$TEMPLATE_CLAUDE" "$TARGET_DIR/CLAUDE.md"
-  echo "CLAUDE.md 생성 완료: $TARGET_DIR"
+  cp "$TEMPLATE_CLAUDE" "$TARGET_DIR/CLAUDE.md" \
+    && echo "CLAUDE.md 생성 완료: $TARGET_DIR" \
+    || echo "WARNING: CLAUDE.md 복사 실패 — 계속 진행" >&2
 else
   echo "WARNING: 템플릿 CLAUDE.md 없음, 건너뜀" >&2
 fi
