@@ -514,10 +514,36 @@ async function runAgent(
  * silently lose a chat again.
  */
 async function backfillUnregisteredChannels(): Promise<void> {
-  // Phase A: walk the platform's authoritative source (Discord diary categories)
-  // and register every channel/thread the bot can see, regardless of whether
-  // a message has ever been stored. This covers archived threads, brand-new
-  // channels with no message yet, and cache-miss cases.
+  // Phase 1 (fast, deterministic): cover every chat_jid that already has
+  // messages but no group row. Runs first so its result isn't blocked by the
+  // long platform walk. Each ensureGroupRegistered does a direct ID fetch
+  // (force=true), so this works even when the channel is invisible to the
+  // guild-wide listing (channel-specific permission, etc).
+  const orphans = listChatJidsByPrefix('dc:').filter(
+    (jid) => !registeredGroups[jid] && /^dc:\d+$/.test(jid),
+  );
+  let phase1Backfilled = 0;
+  for (const jid of orphans) {
+    for (const ch of channels) {
+      if (!ch.ensureGroupRegistered) continue;
+      try {
+        if (await ch.ensureGroupRegistered(jid)) {
+          phase1Backfilled++;
+          break;
+        }
+      } catch (err) {
+        logger.debug({ jid, err: String(err) }, 'Phase 1 backfill attempt failed');
+      }
+    }
+  }
+  logger.info(
+    { scanned: orphans.length, backfilled: phase1Backfilled },
+    'Message-orphan backfill complete',
+  );
+
+  // Phase 2 (slow, exhaustive): walk diary categories so even channels that
+  // have never received a message are registered. Lets new diary channels
+  // respond on their first mention without races.
   for (const ch of channels) {
     if (!ch.backfillRegistrations) continue;
     try {
@@ -529,35 +555,6 @@ async function backfillUnregisteredChannels(): Promise<void> {
       );
     }
   }
-
-  // Phase B: cover the rare case where a chat_jid exists in messages but
-  // wasn't reachable via category walk (e.g. channel was deleted or moved
-  // out of the diary category). Try ensureGroupRegistered per orphan jid.
-  const candidates = listChatJidsByPrefix('dc:').filter(
-    (jid) => !registeredGroups[jid] && /^dc:\d+$/.test(jid),
-  );
-  if (candidates.length === 0) {
-    logger.info('Backfill complete: no message-orphan jids remain');
-    return;
-  }
-  let backfilled = 0;
-  for (const jid of candidates) {
-    for (const ch of channels) {
-      if (!ch.ensureGroupRegistered) continue;
-      try {
-        if (await ch.ensureGroupRegistered(jid)) {
-          backfilled++;
-          break;
-        }
-      } catch (err) {
-        logger.debug({ jid, err: String(err) }, 'Backfill attempt failed');
-      }
-    }
-  }
-  logger.info(
-    { scanned: candidates.length, backfilled },
-    'Message-orphan backfill complete',
-  );
 }
 
 async function startMessageLoop(): Promise<void> {
