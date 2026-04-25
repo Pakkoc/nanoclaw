@@ -441,10 +441,29 @@ export class DiscordChannel implements Channel {
       }
       if (!category || category.type !== ChannelType.GuildCategory) continue;
 
-      // Collect text channels under this category. Discord.js exposes them
-      // via the parent guild's channel cache filtered by parentId.
-      const guild = (category as { guild?: { channels: { cache: Map<string, unknown> } } }).guild;
+      // Collect text channels under this category. Discord.js' guild channel
+      // cache is lazy — idle channels (no recent activity) may be missing
+      // until guild.channels.fetch() is called. Force-populate first so
+      // every diary-category channel is visible regardless of recent traffic.
+      const guild = (
+        category as {
+          guild?: {
+            channels: {
+              fetch: () => Promise<unknown>;
+              cache: Map<string, unknown>;
+            };
+          };
+        }
+      ).guild;
       if (!guild) continue;
+      try {
+        await guild.channels.fetch();
+      } catch (err) {
+        logger.warn(
+          { categoryId, err: String(err) },
+          'Guild channels fetch failed during walk',
+        );
+      }
       const textChannels: TextChannel[] = [];
       for (const ch of guild.channels.cache.values()) {
         const c = ch as TextChannel;
