@@ -410,13 +410,16 @@ export function countTodayBotResponses(
     const sign = numericMatch[0].startsWith('-') ? -1 : 1;
     offsetHours = sign * parseInt(numericMatch[1].replace(/[+-]/, ''), 10);
   } else {
-    // IANA timezone name (e.g. "Asia/Seoul") — derive offset via Intl
+    // Both strings are parsed in host TZ — subtracting cancels host TZ out.
+    // Comparing localStr to now.getTime() instead returns 0 when host TZ matches.
     try {
       const now = new Date();
-      const utcMs = now.getTime();
+      const utcStr = now.toLocaleString('en-US', { timeZone: 'UTC' });
       const localStr = now.toLocaleString('en-US', { timeZone: timezone });
-      const localMs = new Date(localStr).getTime();
-      offsetHours = Math.round((localMs - utcMs) / 3_600_000);
+      offsetHours = Math.round(
+        (new Date(localStr).getTime() - new Date(utcStr).getTime()) /
+          3_600_000,
+      );
     } catch {
       offsetHours = 0;
     }
