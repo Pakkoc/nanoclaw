@@ -34,6 +34,15 @@ Text inside `<internal>` tags is logged but not sent to the user. If you've alre
 
 When working as a sub-agent or teammate, only use `send_message` if instructed to by the main agent.
 
+### 도구 호출 후 응답 마무리 (중요)
+
+도구(`Write`/`Edit`/`Bash`/`Read` 등)를 호출한 후에는 **반드시 사용자에게 보낼 텍스트로 turn을 마무리**한다. 도구 결과만 받고 텍스트 없이 턴이 끝나면, NanoClaw 호스트가 turn-close signal을 못 잡아 응답이 사용자에게 도달하지 않고 다음 메시지가 올 때까지 매달려 있는다 (실제 사고: 2026-04-25 모슈 채널 첫 응답이 6분 지연).
+
+**규칙:**
+- 응답 텍스트를 만든 뒤에 도구를 추가로 부르지 말고, 도구를 다 쓴 뒤에 응답 텍스트로 닫아라.
+- 응답할 텍스트가 정말 없는 경우에도 `<internal>완료</internal>` 같은 한 줄을 마지막에 둬서 turn이 명확히 닫히게 하라.
+- 즉 패턴은 항상 **(thinking → tools…) → 마지막에 text** 로 끝난다.
+
 ## Your Workspace
 
 Files you create are saved in `/workspace/group/`. Use this for notes, research, or anything that should persist.
