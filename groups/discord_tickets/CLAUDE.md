@@ -17,7 +17,7 @@
 CHANNEL_ID="${NANOCLAW_CHAT_JID#dc:}"  # "dc:1234567890" → "1234567890"
 ```
 
-sender_id는 user 메시지의 sender 필드에 Discord ID로 들어 있다.
+sender_id는 user 메시지의 **`senderId` 속성** 값(Discord ID 숫자)이다. `sender` 속성은 닉네임이지 ID가 아니므로 절대 그것을 그대로 쓰지 마라.
 
 ## 응답 프로토콜
 
@@ -38,7 +38,7 @@ CHANNEL_ID="${NANOCLAW_CHAT_JID#dc:}"
 bash /home/node/.claude/skills/diary-create/create-diary.sh <SENDER_ID> "$CHANNEL_ID"
 ```
 
-- `<SENDER_ID>`: user 메시지의 sender 필드 값 (Discord user ID 숫자)
+- `<SENDER_ID>`: user 메시지의 `senderId` 속성 값(Discord user ID 숫자). `sender` 속성(닉네임)을 절대 ID로 사용하지 마라 — 4xx 에러로 사용자 정보 조회 실패한다.
 - `$CHANNEL_ID`: 위에서 추출한 현재 채널 ID
 
 **절대 금지**:
