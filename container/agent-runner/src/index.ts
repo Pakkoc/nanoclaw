@@ -118,9 +118,13 @@ const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
 function writeOutput(output: ContainerOutput): void {
-  console.log(OUTPUT_START_MARKER);
-  console.log(JSON.stringify(output));
-  console.log(OUTPUT_END_MARKER);
+  // Use fs.writeSync(1, ...) instead of console.log to bypass Node's
+  // 4KB block-buffered stdout when running with a piped parent (docker run -i).
+  // Buffered console.log caused agent responses to sit in the container's
+  // stdout buffer until the next stdin event flushed it, manifesting as
+  // 3–6 minute delays between bot reply generation and host delivery.
+  const payload = `${OUTPUT_START_MARKER}\n${JSON.stringify(output)}\n${OUTPUT_END_MARKER}\n`;
+  fs.writeSync(1, payload);
 }
 
 function log(message: string): void {
