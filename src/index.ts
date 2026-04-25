@@ -38,6 +38,7 @@ import {
   getAllTasks,
   countTodayBotResponses,
   getLastBotMessageTimestamp,
+  listChatJidsByPrefix,
   getMessagesSince,
   getNewMessages,
   getRouterState,
@@ -502,6 +503,39 @@ async function runAgent(
     logger.error({ group: group.name, err }, 'Agent error');
     return 'error';
   }
+}
+
+/**
+ * On startup, scan messages table for chat_jids that are missing from
+ * registered_groups and ask each connected channel to (re-)register them.
+ * Closes the gap where a message was stored before discord.ts auto-registration
+ * fired (e.g. an early NanoClaw version, a deploy race, or a Channel adapter
+ * code path that bypassed registration), so daily-limit counting can never
+ * silently lose a chat again.
+ */
+async function backfillUnregisteredChannels(): Promise<void> {
+  const candidates = listChatJidsByPrefix('dc:').filter(
+    (jid) => !registeredGroups[jid] && /^dc:\d+$/.test(jid),
+  );
+  if (candidates.length === 0) return;
+  let backfilled = 0;
+  for (const jid of candidates) {
+    for (const ch of channels) {
+      if (!ch.ensureGroupRegistered) continue;
+      try {
+        if (await ch.ensureGroupRegistered(jid)) {
+          backfilled++;
+          break;
+        }
+      } catch (err) {
+        logger.debug({ jid, err: String(err) }, 'Backfill attempt failed');
+      }
+    }
+  }
+  logger.info(
+    { scanned: candidates.length, backfilled },
+    'Diary registration backfill complete',
+  );
 }
 
 async function startMessageLoop(): Promise<void> {
@@ -1197,6 +1231,7 @@ async function main(): Promise<void> {
   startDeployWatcher();
   startPullWatcher();
   queue.setProcessMessagesFn(processGroupMessages);
+  await backfillUnregisteredChannels();
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');

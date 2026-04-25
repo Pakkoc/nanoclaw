@@ -438,6 +438,13 @@ export function countTodayBotResponses(
   return row.cnt;
 }
 
+export function listChatJidsByPrefix(prefix: string): string[] {
+  return db
+    .prepare('SELECT DISTINCT chat_jid FROM messages WHERE chat_jid LIKE ?')
+    .all(`${prefix}%`)
+    .map((r) => (r as { chat_jid: string }).chat_jid);
+}
+
 export function getLastBotMessageTimestamp(
   chatJid: string,
   botPrefix: string,

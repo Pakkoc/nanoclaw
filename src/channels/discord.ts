@@ -213,49 +213,31 @@ export class DiscordChannel implements Channel {
         isGroup,
       );
 
-      // Auto-register per-channel groups for ticket and diary channels.
-      // Each channel gets its own isolated group (and container) so multiple
-      // simultaneous conversations are processed in parallel.
+      // Auto-register per-channel groups. Tickets stay inline (single category,
+      // simple shape). Diary registration goes through ensureGroupRegistered
+      // so the same idempotent path covers onMessageCreate, host backfill on
+      // startup, and the message-loop backstop — no path can silently skip it.
       const allGroups = this.opts.registeredGroups();
-      if (!allGroups[realJid]) {
-        if (isTicketChannel) {
-          this.opts.registerGroup(
-            realJid,
-            {
-              name: `티켓 #${ticketChannel!.name}`,
-              folder: `discord_tickets_ch${channelId}`,
-              trigger: this.opts.defaultTrigger(),
-              added_at: new Date().toISOString(),
-              requiresTrigger: false,
-            },
-            'discord_tickets',
-          );
-          logger.info(
-            { channelId, channelName: ticketChannel!.name },
-            'Auto-registered ticket channel group',
-          );
-        } else if (isDiaryChannel) {
-          const diaryChannelName =
-            (message.channel as TextChannel).name ?? channelId;
-          this.opts.registerGroup(
-            realJid,
-            {
-              name: `기숙사 다이어리 #${diaryChannelName}`,
-              // Threads share their parent channel's folder so they inherit
-              // the same CLAUDE.md and context. The JID (realJid) stays as
-              // the thread's own channel ID so replies go to the thread.
-              folder: `diaries/discord_diary_ch${diaryParentChannelId}`,
-              trigger: this.opts.defaultTrigger(),
-              added_at: new Date().toISOString(),
-              requiresTrigger: true,
-            },
-            'discord_diary',
-          );
-          logger.info(
-            { channelId, channelName: diaryChannelName },
-            'Auto-registered diary channel group',
-          );
-        }
+      if (!allGroups[realJid] && isTicketChannel) {
+        this.opts.registerGroup(
+          realJid,
+          {
+            name: `티켓 #${ticketChannel!.name}`,
+            folder: `discord_tickets_ch${channelId}`,
+            trigger: this.opts.defaultTrigger(),
+            added_at: new Date().toISOString(),
+            requiresTrigger: false,
+          },
+          'discord_tickets',
+        );
+        logger.info(
+          { channelId, channelName: ticketChannel!.name },
+          'Auto-registered ticket channel group',
+        );
+      }
+      // Diary: idempotent. No-op if already registered.
+      if (!isTicketChannel) {
+        await this.ensureGroupRegistered(realJid);
       }
 
       // Only deliver full message for registered groups
@@ -371,6 +353,70 @@ export class DiscordChannel implements Channel {
     } catch (err) {
       logger.debug({ jid, err }, 'Failed to send Discord typing indicator');
     }
+  }
+
+  async ensureGroupRegistered(chatJid: string): Promise<boolean> {
+    if (!chatJid.startsWith('dc:')) return false;
+    if (this.opts.registeredGroups()[chatJid]) return true;
+
+    const channelId = chatJid.slice('dc:'.length);
+    if (!/^\d+$/.test(channelId)) return false;
+    if (!this.client) return false;
+
+    let channel;
+    try {
+      channel = await this.client.channels.fetch(channelId);
+    } catch (err) {
+      logger.debug({ chatJid, err: String(err) }, 'ensureGroupRegistered fetch failed');
+      return false;
+    }
+    if (!channel) return false;
+
+    const isThread =
+      channel.type === ChannelType.PublicThread ||
+      channel.type === ChannelType.PrivateThread;
+
+    let categoryId: string;
+    let parentChannelId: string;
+    let chanName: string;
+
+    if (isThread) {
+      const thread = channel as ThreadChannel;
+      const parent = thread.parent as TextChannel | null;
+      if (!parent) return false;
+      categoryId = parent.parentId ?? '';
+      parentChannelId = thread.parentId ?? channelId;
+      chanName = thread.name;
+    } else if (
+      channel.type === ChannelType.GuildText &&
+      'parentId' in channel
+    ) {
+      const textChannel = channel as TextChannel;
+      categoryId = textChannel.parentId ?? '';
+      parentChannelId = textChannel.id;
+      chanName = textChannel.name;
+    } else {
+      return false;
+    }
+
+    if (!DIARY_CATEGORY_IDS.has(categoryId)) return false;
+
+    this.opts.registerGroup(
+      chatJid,
+      {
+        name: `기숙사 다이어리 #${chanName}`,
+        folder: `diaries/discord_diary_ch${parentChannelId}`,
+        trigger: this.opts.defaultTrigger(),
+        added_at: new Date().toISOString(),
+        requiresTrigger: true,
+      },
+      'discord_diary',
+    );
+    logger.info(
+      { chatJid, parentChannelId, chanName, isThread },
+      'Backfilled diary registration via ensureGroupRegistered',
+    );
+    return true;
   }
 }
 

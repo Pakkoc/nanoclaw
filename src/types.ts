@@ -95,6 +95,12 @@ export interface Channel {
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
+  // Optional: given a chat_jid, fetch the platform's view and register it as
+  // a group via opts.registerGroup if it should be auto-managed (e.g. inside
+  // a diary category). Returns true if registration was performed or already
+  // existed. Used by host-side backfill / message-loop backstop so registry
+  // gaps cannot turn into silent count loss.
+  ensureGroupRegistered?(chatJid: string): Promise<boolean>;
 }
 
 // Callback type that channels use to deliver inbound messages
