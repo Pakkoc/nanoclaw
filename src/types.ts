@@ -101,6 +101,11 @@ export interface Channel {
   // existed. Used by host-side backfill / message-loop backstop so registry
   // gaps cannot turn into silent count loss.
   ensureGroupRegistered?(chatJid: string): Promise<boolean>;
+  // Optional: walk the platform's authoritative source (e.g. Discord diary
+  // categories) and register every channel/thread (active + archived) that
+  // should be auto-managed. Called once on startup so registry is in sync
+  // with platform state regardless of message history.
+  backfillRegistrations?(): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages

@@ -514,10 +514,32 @@ async function runAgent(
  * silently lose a chat again.
  */
 async function backfillUnregisteredChannels(): Promise<void> {
+  // Phase A: walk the platform's authoritative source (Discord diary categories)
+  // and register every channel/thread the bot can see, regardless of whether
+  // a message has ever been stored. This covers archived threads, brand-new
+  // channels with no message yet, and cache-miss cases.
+  for (const ch of channels) {
+    if (!ch.backfillRegistrations) continue;
+    try {
+      await ch.backfillRegistrations();
+    } catch (err) {
+      logger.warn(
+        { channel: ch.name, err: String(err) },
+        'Channel backfillRegistrations failed',
+      );
+    }
+  }
+
+  // Phase B: cover the rare case where a chat_jid exists in messages but
+  // wasn't reachable via category walk (e.g. channel was deleted or moved
+  // out of the diary category). Try ensureGroupRegistered per orphan jid.
   const candidates = listChatJidsByPrefix('dc:').filter(
     (jid) => !registeredGroups[jid] && /^dc:\d+$/.test(jid),
   );
-  if (candidates.length === 0) return;
+  if (candidates.length === 0) {
+    logger.info('Backfill complete: no message-orphan jids remain');
+    return;
+  }
   let backfilled = 0;
   for (const jid of candidates) {
     for (const ch of channels) {
@@ -534,7 +556,7 @@ async function backfillUnregisteredChannels(): Promise<void> {
   }
   logger.info(
     { scanned: candidates.length, backfilled },
-    'Diary registration backfill complete',
+    'Message-orphan backfill complete',
   );
 }
 

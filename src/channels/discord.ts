@@ -365,7 +365,7 @@ export class DiscordChannel implements Channel {
 
     let channel;
     try {
-      channel = await this.client.channels.fetch(channelId);
+      channel = await this.client.channels.fetch(channelId, { force: true });
     } catch (err) {
       logger.debug({ chatJid, err: String(err) }, 'ensureGroupRegistered fetch failed');
       return false;
@@ -417,6 +417,80 @@ export class DiscordChannel implements Channel {
       'Backfilled diary registration via ensureGroupRegistered',
     );
     return true;
+  }
+
+  async backfillRegistrations(): Promise<void> {
+    if (!this.client) return;
+    let walked = 0;
+    let registered = 0;
+    let failed = 0;
+
+    for (const categoryId of DIARY_CATEGORY_IDS) {
+      let category;
+      try {
+        category = await this.client.channels.fetch(categoryId, {
+          force: true,
+        });
+      } catch (err) {
+        logger.warn(
+          { categoryId, err: String(err) },
+          'Diary category fetch failed during walk',
+        );
+        failed++;
+        continue;
+      }
+      if (!category || category.type !== ChannelType.GuildCategory) continue;
+
+      // Collect text channels under this category. Discord.js exposes them
+      // via the parent guild's channel cache filtered by parentId.
+      const guild = (category as { guild?: { channels: { cache: Map<string, unknown> } } }).guild;
+      if (!guild) continue;
+      const textChannels: TextChannel[] = [];
+      for (const ch of guild.channels.cache.values()) {
+        const c = ch as TextChannel;
+        if (c.parentId === categoryId && c.type === ChannelType.GuildText) {
+          textChannels.push(c);
+        }
+      }
+
+      for (const channel of textChannels) {
+        walked++;
+        if (await this.ensureGroupRegistered(`dc:${channel.id}`)) registered++;
+
+        // Active threads
+        try {
+          const active = await channel.threads.fetchActive();
+          for (const [, thread] of active.threads) {
+            walked++;
+            if (await this.ensureGroupRegistered(`dc:${thread.id}`)) registered++;
+          }
+        } catch (err) {
+          logger.debug(
+            { channelId: channel.id, err: String(err) },
+            'Active thread fetch failed',
+          );
+        }
+
+        // Archived threads (paginated; one page covers ~100 most recent)
+        try {
+          const archived = await channel.threads.fetchArchived({ limit: 100 });
+          for (const [, thread] of archived.threads) {
+            walked++;
+            if (await this.ensureGroupRegistered(`dc:${thread.id}`)) registered++;
+          }
+        } catch (err) {
+          logger.debug(
+            { channelId: channel.id, err: String(err) },
+            'Archived thread fetch failed',
+          );
+        }
+      }
+    }
+
+    logger.info(
+      { walked, registered, categoriesFailed: failed },
+      'Diary category walk complete',
+    );
   }
 }
 
