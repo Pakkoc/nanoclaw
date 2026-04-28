@@ -311,7 +311,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         missedMessages[missedMessages.length - 1].timestamp;
       saveState();
       logger.info(
-        { group: group.name, folder: group.folder, todayCount, limit: DIARY_DAILY_LIMIT },
+        {
+          group: group.name,
+          folder: group.folder,
+          todayCount,
+          limit: DIARY_DAILY_LIMIT,
+        },
         'Daily diary limit reached — skipping response',
       );
       return true;
@@ -532,7 +537,10 @@ async function backfillUnregisteredChannels(): Promise<void> {
           break;
         }
       } catch (err) {
-        logger.debug({ jid, err: String(err) }, 'Phase 1 backfill attempt failed');
+        logger.debug(
+          { jid, err: String(err) },
+          'Phase 1 backfill attempt failed',
+        );
       }
     }
   }
@@ -644,7 +652,12 @@ async function startMessageLoop(): Promise<void> {
                 groupMessages[groupMessages.length - 1].timestamp;
               saveState();
               logger.info(
-                { group: group.name, folder: group.folder, todayCount, limit: DIARY_DAILY_LIMIT },
+                {
+                  group: group.name,
+                  folder: group.folder,
+                  todayCount,
+                  limit: DIARY_DAILY_LIMIT,
+                },
                 'Daily diary limit reached (pipe path) — skipping',
               );
               continue;

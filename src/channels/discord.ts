@@ -367,7 +367,10 @@ export class DiscordChannel implements Channel {
     try {
       channel = await this.client.channels.fetch(channelId, { force: true });
     } catch (err) {
-      logger.debug({ chatJid, err: String(err) }, 'ensureGroupRegistered fetch failed');
+      logger.debug(
+        { chatJid, err: String(err) },
+        'ensureGroupRegistered fetch failed',
+      );
       return false;
     }
     if (!channel) return false;

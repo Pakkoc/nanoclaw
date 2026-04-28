@@ -458,8 +458,7 @@ export function countTodayBotResponses(
       const utcStr = now.toLocaleString('en-US', { timeZone: 'UTC' });
       const localStr = now.toLocaleString('en-US', { timeZone: timezone });
       offsetHours = Math.round(
-        (new Date(localStr).getTime() - new Date(utcStr).getTime()) /
-          3_600_000,
+        (new Date(localStr).getTime() - new Date(utcStr).getTime()) / 3_600_000,
       );
     } catch {
       offsetHours = 0;
