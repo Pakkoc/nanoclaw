@@ -105,13 +105,15 @@ NEW_CHANNEL_ID=""
 cleanup() {
   local exit_code=$?
   if [ "$COMPLETE_MSG_SENT" -eq 0 ]; then
-    log "WARNING: 완료 메시지 미전송 감지 (exit_code=$exit_code) — 관리자 채널 알림"
-    local alert="⚠️ 다이어리 생성 완료 메시지 미전송\n티켓 채널: <#${TICKET_CHANNEL_ID}>"
     if [ -n "$NEW_CHANNEL_ID" ]; then
-      alert="${alert}\n생성된 채널: <#${NEW_CHANNEL_ID}>"
+      # 채널은 생성됐지만 완료 메시지 전송만 실패 — 부차적 문제, 경고 생략
+      log "INFO: 완료 메시지 미전송이나 채널($NEW_CHANNEL_ID)은 정상 생성됨 — 관리자 알림 생략"
+    else
+      # 채널 자체가 생성되지 않은 진짜 실패
+      log "WARNING: 다이어리 생성 실패 감지 (exit_code=$exit_code) — 관리자 채널 알림"
+      local alert="⚠️ 다이어리 생성 실패\n티켓 채널: <#${TICKET_CHANNEL_ID}>\n로그: $LOG_FILE"
+      send_message "$ADMIN_CHANNEL" "$(printf '%b' "$alert")" || true
     fi
-    alert="${alert}\n로그: $LOG_FILE"
-    send_message "$ADMIN_CHANNEL" "$(printf '%b' "$alert")" || true
   fi
   log "=== 스크립트 종료 (exit=$exit_code) ==="
 }
