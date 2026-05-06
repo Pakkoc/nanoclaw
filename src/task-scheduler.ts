@@ -15,6 +15,8 @@ import {
   logTaskRun,
   updateTask,
   updateTaskAfterRun,
+  deleteSession,
+  setSession,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
@@ -203,11 +205,64 @@ async function runTask(
 
     if (closeTimer) clearTimeout(closeTimer);
 
-    if (output.status === 'error') {
+    // Detect stale/corrupt session — clear it and retry without session ID.
+    // Mirrors the same recovery logic in index.ts runAgent().
+    const isStaleSession =
+      sessionId &&
+      output.status === 'error' &&
+      output.error &&
+      /no conversation found|ENOENT.*\.jsonl|session.*not found/i.test(output.error);
+
+    if (isStaleSession) {
+      logger.warn(
+        { taskId: task.id, staleSessionId: sessionId },
+        'Stale session detected in scheduled task — clearing and retrying without session',
+      );
+      deleteSession(task.group_folder);
+
+      const retryOutput = await runContainerAgent(
+        group,
+        {
+          prompt: task.prompt,
+          sessionId: undefined,
+          groupFolder: task.group_folder,
+          chatJid: task.chat_jid,
+          isMain,
+          isScheduledTask: true,
+          assistantName: ASSISTANT_NAME,
+          script: task.script || undefined,
+        },
+        (proc, containerName) =>
+          deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
+        async (streamedOutput: ContainerOutput) => {
+          if (streamedOutput.result) {
+            result = streamedOutput.result;
+            await deps.sendMessage(task.chat_jid, streamedOutput.result);
+            scheduleClose();
+          }
+          if (streamedOutput.status === 'success') {
+            deps.queue.notifyIdle(task.chat_jid);
+            scheduleClose();
+          }
+          if (streamedOutput.status === 'error') {
+            error = streamedOutput.error || 'Unknown error';
+          }
+        },
+      );
+
+      if (retryOutput.status === 'error') {
+        error = retryOutput.error || 'Unknown error';
+      } else {
+        if (retryOutput.newSessionId) setSession(task.group_folder, retryOutput.newSessionId);
+        if (retryOutput.result) result = retryOutput.result;
+      }
+    } else if (output.status === 'error') {
       error = output.error || 'Unknown error';
-    } else if (output.result) {
+    } else {
+      // Save new session ID produced by the task (keeps group session current)
+      if (output.newSessionId) setSession(task.group_folder, output.newSessionId);
       // Result was already forwarded to the user via the streaming callback above
-      result = output.result;
+      if (output.result) result = output.result;
     }
 
     logger.info(
