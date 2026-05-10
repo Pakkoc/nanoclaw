@@ -211,7 +211,9 @@ async function runTask(
       sessionId &&
       output.status === 'error' &&
       output.error &&
-      /no conversation found|ENOENT.*\.jsonl|session.*not found/i.test(output.error);
+      /no conversation found|ENOENT.*\.jsonl|session.*not found/i.test(
+        output.error,
+      );
 
     if (isStaleSession) {
       logger.warn(
@@ -253,14 +255,16 @@ async function runTask(
       if (retryOutput.status === 'error') {
         error = retryOutput.error || 'Unknown error';
       } else {
-        if (retryOutput.newSessionId) setSession(task.group_folder, retryOutput.newSessionId);
+        if (retryOutput.newSessionId)
+          setSession(task.group_folder, retryOutput.newSessionId);
         if (retryOutput.result) result = retryOutput.result;
       }
     } else if (output.status === 'error') {
       error = output.error || 'Unknown error';
     } else {
       // Save new session ID produced by the task (keeps group session current)
-      if (output.newSessionId) setSession(task.group_folder, output.newSessionId);
+      if (output.newSessionId)
+        setSession(task.group_folder, output.newSessionId);
       // Result was already forwarded to the user via the streaming callback above
       if (output.result) result = output.result;
     }
