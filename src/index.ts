@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execSync, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -331,6 +331,56 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   lastAgentTimestamp[chatJid] =
     missedMessages[missedMessages.length - 1].timestamp;
   saveState();
+
+  // ── Ticket-channel diary fast-path ─────────────────────────────────────
+  // If a ticket channel receives a message containing "다이어리", run
+  // create-diary.sh directly on the host instead of waking an LLM agent.
+  // This guarantees the correct channel-tag completion message every time.
+  if (group.folder.startsWith('discord_tickets_ch')) {
+    const diaryMsg = missedMessages.find(
+      (m) => !m.is_from_me && /다이어리/.test(m.content),
+    );
+    if (diaryMsg) {
+      const senderId = diaryMsg.sender;
+      const channelId = chatJid.replace(/^dc:/, '');
+      const scriptPath = path.join(
+        process.cwd(),
+        'container',
+        'skills',
+        'diary-create',
+        'create-diary.sh',
+      );
+      if (fs.existsSync(scriptPath)) {
+        logger.info(
+          { chatJid, senderId, channelId },
+          'Diary request intercepted — running create-diary.sh on host',
+        );
+        await new Promise<void>((resolve) => {
+          const proc = spawn('bash', [scriptPath, senderId, channelId], {
+            env: { ...process.env },
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
+          proc.stdout.on('data', (d: Buffer) =>
+            logger.debug({ script: 'diary-create' }, d.toString().trim()),
+          );
+          proc.stderr.on('data', (d: Buffer) =>
+            logger.warn({ script: 'diary-create' }, d.toString().trim()),
+          );
+          proc.on('close', (code) => {
+            if (code !== 0) {
+              logger.error(
+                { code, chatJid },
+                'create-diary.sh exited with non-zero code',
+              );
+            }
+            resolve();
+          });
+        });
+        return true; // skip LLM agent
+      }
+    }
+  }
+  // ───────────────────────────────────────────────────────────────────────
 
   logger.info(
     { group: group.name, messageCount: missedMessages.length },
