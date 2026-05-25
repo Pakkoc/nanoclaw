@@ -207,10 +207,14 @@ log "[6/9] 채널 생성됨: $NEW_CHANNEL_ID"
 
 # ─── 7단계: 권한 설정 ─────────────────────────────────────────────────
 log "[7/9] 권한 설정..."
-# allow: VIEW_CHANNEL(1024) + SEND_MESSAGES(2048) + MANAGE_MESSAGES(8192) = 11264
-# deny: MANAGE_CHANNELS(16)
+# 채널 주인: allow VIEW_CHANNEL(1024) + SEND_MESSAGES(2048) + MANAGE_MESSAGES(8192) = 11264, deny MANAGE_CHANNELS(16)
 PERM_PAYLOAD='{"allow":"11264","deny":"16","type":1}'
 api_put "/channels/$NEW_CHANNEL_ID/permissions/$USER_ID" "$PERM_PAYLOAD" > /dev/null || log "WARNING: 권한 설정 실패 — 계속 진행"
+
+# @everyone: SEND_MESSAGES(2048) + CREATE_PUBLIC_THREADS(34359738368) + CREATE_PRIVATE_THREADS(68719476736) + SEND_MESSAGES_IN_THREADS(274877906944) deny
+# = 377957124096 (다이어리는 주인만 작성, 다른 멤버는 이모지 반응만 가능)
+EVERYONE_PERM_PAYLOAD='{"allow":"0","deny":"377957124096","type":0}'
+api_put "/channels/$NEW_CHANNEL_ID/permissions/$GUILD_ID" "$EVERYONE_PERM_PAYLOAD" > /dev/null || log "WARNING: @everyone 스레드 차단 설정 실패 — 계속 진행"
 
 send_message "$NEW_CHANNEL_ID" "<@$USER_ID>" || log "WARNING: 채널 내 멘션 실패 — 계속 진행"
 
