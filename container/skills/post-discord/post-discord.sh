@@ -9,8 +9,11 @@
 
 set -euo pipefail
 
-# discord_diary 그룹에서는 외부 채널 메시지 전송 완전 차단
-if [[ "${NANOCLAW_GROUP_FOLDER:-}" == discord_diary* ]]; then
+# discord_diary 그룹에서는 외부 채널 메시지 전송 완전 차단.
+# NANOCLAW_GROUP_FOLDER는 MCP 서버 환경에만 있고 bash에는 없으므로
+# agent-runner가 시작 시 /workspace/group/.nanoclaw-group에 기록한 값을 읽는다.
+_NANOCLAW_GROUP=$(cat /workspace/group/.nanoclaw-group 2>/dev/null || echo "${NANOCLAW_GROUP_FOLDER:-}")
+if [[ "$_NANOCLAW_GROUP" == discord_diary* ]]; then
   echo "ERROR: post-discord is disabled in diary channels." >&2
   exit 1
 fi

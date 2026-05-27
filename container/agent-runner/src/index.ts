@@ -616,6 +616,13 @@ async function main(): Promise<void> {
       /* may not exist */
     }
     log(`Received input for group: ${containerInput.groupFolder}`);
+    // Write group metadata for bash scripts (e.g. post-discord skill uses this
+    // to block outbound messages from diary/restricted channels).
+    try {
+      fs.writeFileSync('/workspace/group/.nanoclaw-group', containerInput.groupFolder, 'utf8');
+    } catch {
+      /* non-fatal: writable group dir may not exist yet */
+    }
   } catch (err) {
     writeOutput({
       status: 'error',
