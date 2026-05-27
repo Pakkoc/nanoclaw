@@ -754,8 +754,16 @@ async function startMessageLoop(): Promise<void> {
 }
 
 /**
- * Startup recovery: check for unprocessed messages in registered groups.
- * Handles crash between advancing lastTimestamp and processing messages.
+ * Startup recovery: log unprocessed messages but do NOT enqueue them.
+ *
+ * Why: cursor > lastBotReply is the normal post-response state — we
+ * advance the cursor when the agent finishes, but lastBotReply only
+ * updates on actual sends. So getOrRecoverCursor rolls almost every
+ * channel back on startup, and enqueuing each one here caused a
+ * thundering herd: 20 containers spawning at once after every restart,
+ * starving the main channel behind low-priority traffic. The message
+ * loop's polling will pick up any genuine pending messages within one
+ * POLL_INTERVAL tick.
  */
 function recoverPendingMessages(): void {
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
@@ -768,9 +776,8 @@ function recoverPendingMessages(): void {
     if (pending.length > 0) {
       logger.info(
         { group: group.name, pendingCount: pending.length },
-        'Recovery: found unprocessed messages',
+        'Recovery: found unprocessed messages — letting message loop pick them up',
       );
-      queue.enqueueMessageCheck(chatJid);
     }
   }
 }
@@ -867,32 +874,35 @@ function startDeployWatcher(): void {
       return;
     }
 
-    // 2. Check for staged changes
+    // 2. Check for staged changes — if nothing is staged there is nothing
+    // new to deploy. Exit the deploy flow entirely instead of rebuilding
+    // and restarting, which would disrupt in-flight responses for a no-op.
     const status = runStep('git-status', 'git diff --cached --name-only');
     if (status.ok && !status.out.trim()) {
       appendLog(
-        '  [git-status] no staged changes — skipping commit/push, doing build only',
+        '  [git-status] no staged changes — nothing to deploy, skipping rebuild and restart',
       );
-    } else {
-      // 3. Commit with bot identity
-      const escaped = message.replace(/["\\$`]/g, '\\$&');
-      const commit = runStep(
-        'git-commit',
-        `git -c user.email="bot@nanoclaw.local" -c user.name="NanoClaw-Bot" commit -m "${escaped}"`,
-      );
-      if (!commit.ok) {
-        appendLog('END: aborted at git commit');
-        return;
-      }
+      return;
+    }
 
-      // 4. Push to origin/main (uses host SSH key)
-      const push = runStep('git-push', 'git push origin main');
-      if (!push.ok) {
-        appendLog(
-          'END: aborted at git push — local commit saved, host intervention needed',
-        );
-        return;
-      }
+    // 3. Commit with bot identity
+    const escaped = message.replace(/["\\$`]/g, '\\$&');
+    const commit = runStep(
+      'git-commit',
+      `git -c user.email="bot@nanoclaw.local" -c user.name="NanoClaw-Bot" commit -m "${escaped}"`,
+    );
+    if (!commit.ok) {
+      appendLog('END: aborted at git commit');
+      return;
+    }
+
+    // 4. Push to origin/main (uses host SSH key)
+    const push = runStep('git-push', 'git push origin main');
+    if (!push.ok) {
+      appendLog(
+        'END: aborted at git push — local commit saved, host intervention needed',
+      );
+      return;
     }
 
     // 5. Rebuild TypeScript
