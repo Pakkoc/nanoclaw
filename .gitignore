@@ -31,6 +31,7 @@ groups/global/tools.env
 groups/*/memories.md
 groups/*/daily-memories/
 groups/*/logs/
+groups/**/persona.md
 *.keys.json
 .env
 .env.local
