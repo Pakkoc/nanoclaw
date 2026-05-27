@@ -9,6 +9,12 @@
 
 set -euo pipefail
 
+# discord_diary 그룹에서는 외부 채널 메시지 전송 완전 차단
+if [[ "${NANOCLAW_GROUP_FOLDER:-}" == discord_diary* ]]; then
+  echo "ERROR: post-discord is disabled in diary channels." >&2
+  exit 1
+fi
+
 if [ $# -lt 1 ]; then
   echo "Usage: $0 <channel_id>  (body via stdin)" >&2
   exit 2
