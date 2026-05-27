@@ -81,7 +81,7 @@ let messageLoopRunning = false;
 /** Folders whose channels have a hard daily response limit (enforced at host level). */
 const DIARY_FOLDER_PREFIX = 'diaries/';
 /** Maximum bot responses per day for diary channels. */
-const DIARY_DAILY_LIMIT = 5;
+const DIARY_DAILY_LIMIT = 10;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
