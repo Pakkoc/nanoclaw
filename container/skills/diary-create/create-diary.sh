@@ -182,6 +182,35 @@ print(nick)
 
 log "[4/9] 채널명: $CHANNEL_NAME"
 
+# ─── 4.5단계: 기존 다이어리 중복 체크 ────────────────────────────────
+log "[4.5/9] 기존 다이어리 채널 중복 체크..."
+GUILD_CHANNELS=$(api_get "/guilds/$GUILD_ID/channels")
+EXISTING_CHANNEL_ID=$(echo "$GUILD_CHANNELS" | python3 -c "
+import json, sys
+channels = json.load(sys.stdin)
+user_id = sys.argv[1]
+category_id = sys.argv[2]
+for ch in channels:
+    if str(ch.get('parent_id')) != category_id:
+        continue
+    for ow in ch.get('permission_overwrites', []):
+        if ow.get('type') == 1 and str(ow.get('id')) == user_id:
+            print(ch['id'])
+            sys.exit(0)
+" "$USER_ID" "$CATEGORY_ID" 2>/dev/null || echo "")
+
+if [ -n "$EXISTING_CHANNEL_ID" ]; then
+  log "기존 다이어리 채널 발견: $EXISTING_CHANNEL_ID — 중복 생성 차단"
+  COMPLETE_MSG="이미 다이어리가 있어요! 💛
+# <#$EXISTING_CHANNEL_ID>
+여기서 계속 기록해주세요 📖"
+  send_message "$TICKET_CHANNEL_ID" "$COMPLETE_MSG" || true
+  COMPLETE_MSG_SENT=1
+  exit 0
+fi
+
+log "기존 다이어리 없음 — 생성 진행"
+
 # ─── 5단계: 채널 생성 ─────────────────────────────────────────────────
 log "[5/9] 다이어리 채널 생성..."
 CREATE_PAYLOAD=$(python3 -c "
