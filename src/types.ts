@@ -106,6 +106,11 @@ export interface Channel {
   // should be auto-managed. Called once on startup so registry is in sync
   // with platform state regardless of message history.
   backfillRegistrations?(): Promise<void>;
+  // Optional: probe whether the underlying platform channel for this jid no
+  // longer exists (e.g. Discord channel was deleted). Returns true only when
+  // the channel is confirmed gone; false on existence or any ambiguous error,
+  // so callers can safely deregister without risking false positives.
+  probeChannelGone?(jid: string): Promise<boolean>;
 }
 
 // Callback type that channels use to deliver inbound messages

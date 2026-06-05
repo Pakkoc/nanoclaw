@@ -349,6 +349,32 @@ export async function runContainerAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
+  // Per-ticket channel folders (discord_tickets_ch<digits>) get a COPY of the
+  // canonical discord_tickets/CLAUDE.md, not a shared mount — so each ticket
+  // channel can accumulate its own memories.md while still following the same
+  // operating rules. Because that copy drifts whenever the template changes,
+  // we re-copy from the tracked template on every spawn (atomic via tmp+rename)
+  // so the live channel always reflects the latest discord_tickets/CLAUDE.md.
+  // The regex requires the _ch<digits> suffix so it matches per-channel folders
+  // only — never the template folder (discord_tickets) or diary folders
+  // (diaries/...).
+  if (/^discord_tickets_ch\d+$/.test(group.folder)) {
+    try {
+      const tmpl = path.join(GROUPS_DIR, 'discord_tickets', 'CLAUDE.md');
+      if (fs.existsSync(tmpl)) {
+        const dest = path.join(groupDir, 'CLAUDE.md');
+        const tmp = dest + '.tmp-' + process.pid;
+        fs.copyFileSync(tmpl, tmp);
+        fs.renameSync(tmp, dest);
+      }
+    } catch (err) {
+      logger.warn(
+        { folder: group.folder, err },
+        'Ticket CLAUDE.md refresh failed',
+      );
+    }
+  }
+
   // Diary channels: enforce the global persona by removing any per-channel
   // tone/nickname overrides from memories.md before the agent reads it.
   if (group.folder.startsWith('diaries/')) {

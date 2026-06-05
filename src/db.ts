@@ -781,6 +781,34 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
   return result;
 }
 
+export function deleteRegisteredGroup(jid: string): void {
+  db.prepare('DELETE FROM registered_groups WHERE jid = ?').run(jid);
+}
+
+export function deleteChat(jid: string): void {
+  db.prepare('DELETE FROM chats WHERE jid = ?').run(jid);
+}
+
+export function deleteMessagesForChat(jid: string): void {
+  db.prepare('DELETE FROM messages WHERE chat_jid = ?').run(jid);
+}
+
+/**
+ * Remove all DB records tied to a single jid in one transaction. Child
+ * messages are deleted before their parent chat (and the registered_groups
+ * row) because better-sqlite3 enables `PRAGMA foreign_keys` by default (ON),
+ * so the messages -> chats FK is enforced and reversing the order would
+ * violate the constraint. Session rows are keyed by folder, not jid, so they
+ * are intentionally left to deleteSession(folder).
+ */
+export function deregisterGroupRecords(jid: string): void {
+  db.transaction(() => {
+    deleteMessagesForChat(jid);
+    deleteChat(jid);
+    deleteRegisteredGroup(jid);
+  })();
+}
+
 // --- JSON migration ---
 
 function migrateJsonState(): void {

@@ -1,6 +1,7 @@
 import {
   ChannelType,
   Client,
+  DiscordAPIError,
   Events,
   GatewayIntentBits,
   Message,
@@ -28,6 +29,7 @@ export interface DiscordChannelOpts {
     group: RegisteredGroup,
     templateFolder?: string,
   ) => void;
+  deregisterGroup: (jid: string) => void;
   defaultTrigger: () => string;
 }
 
@@ -272,6 +274,15 @@ export class DiscordChannel implements Channel {
       );
     });
 
+    // Deregister per-channel groups when their Discord channel/thread is
+    // deleted, so tombstoned tickets/diaries don't linger in the registry.
+    this.client.on(Events.ChannelDelete, (channel) =>
+      this.handleChannelDeleted(channel.id),
+    );
+    this.client.on(Events.ThreadDelete, (thread) =>
+      this.handleChannelDeleted(thread.id),
+    );
+
     // Handle errors gracefully
     this.client.on(Events.Error, (err) => {
       logger.error({ err: err.message }, 'Discord client error');
@@ -420,6 +431,33 @@ export class DiscordChannel implements Channel {
       'Backfilled diary registration via ensureGroupRegistered',
     );
     return true;
+  }
+
+  private handleChannelDeleted(channelId: string): void {
+    const jid = `dc:${channelId}`;
+    const group = this.opts.registeredGroups()[jid];
+    if (!group) return;
+    const isLifecycleGroup =
+      group.folder.startsWith('discord_tickets_ch') ||
+      group.folder.startsWith('diaries/');
+    if (!isLifecycleGroup) return;
+
+    this.opts.deregisterGroup(jid);
+    logger.info(
+      { jid, folder: group.folder },
+      'Deregistered Discord group after channel deletion',
+    );
+  }
+
+  async probeChannelGone(jid: string): Promise<boolean> {
+    if (!this.client) return false;
+    const channelId = jid.replace(/^dc:/, '');
+    try {
+      await this.client.channels.fetch(channelId, { force: true });
+      return false;
+    } catch (err) {
+      return err instanceof DiscordAPIError && err.code === 10003;
+    }
   }
 
   async backfillRegistrations(): Promise<void> {

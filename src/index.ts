@@ -6,6 +6,7 @@ import { OneCLI } from '@onecli-sh/sdk';
 
 import {
   ASSISTANT_NAME,
+  DATA_DIR,
   DEFAULT_TRIGGER,
   getTriggerPattern,
   GROUPS_DIR,
@@ -35,6 +36,7 @@ import {
   getAllRegisteredGroups,
   getAllSessions,
   deleteSession,
+  deregisterGroupRecords,
   getAllTasks,
   countTodayBotResponses,
   getLastBotMessageTimestamp,
@@ -50,7 +52,7 @@ import {
   storeMessage,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
-import { resolveGroupFolderPath } from './group-folder.js';
+import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
@@ -77,6 +79,14 @@ let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
+
+/**
+ * In-memory tombstone set of JIDs that have been deregistered during this
+ * process lifetime. Guards registerGroup against a channel re-registering a
+ * group we just tore down (e.g. a late ensureGroupRegistered/backfill racing
+ * with a ChannelDelete). Bounded to ~2000 entries (FIFO eviction).
+ */
+const deregisteredJids = new Set<string>();
 
 /** Folders whose channels have a hard daily response limit (enforced at host level). */
 const DIARY_FOLDER_PREFIX = 'diaries/';
@@ -170,6 +180,13 @@ function registerGroup(
   group: RegisteredGroup,
   templateFolder?: string,
 ): void {
+  // Tombstone guard: refuse to re-register a group we deregistered this
+  // process lifetime (prevents a late backfill/auto-register racing a delete).
+  if (deregisteredJids.has(jid)) {
+    logger.debug({ jid }, 'Skipping re-register of deregistered group');
+    return;
+  }
+
   let groupDir: string;
   try {
     groupDir = resolveGroupFolderPath(group.folder);
@@ -232,6 +249,85 @@ function registerGroup(
     );
     queue.enqueueMessageCheck(jid);
   }
+}
+
+/**
+ * Tear down a registered group whose backing channel is gone (Discord channel
+ * deleted, ticket closed, diary removed). Removes DB rows, the agent session,
+ * in-memory state, and runtime directories — but PRESERVES the persistent
+ * group folder (groups/<folder>) so its CLAUDE.md and history survive.
+ *
+ * Idempotent: a no-op when the JID is not registered. The JID is added to the
+ * in-memory tombstone set so a racing re-register is rejected.
+ */
+function deregisterGroup(jid: string): void {
+  const group = registeredGroups[jid];
+  if (!group) return; // idempotent
+
+  const folder = group.folder;
+
+  // DB rows are jid-scoped — always safe to remove for this channel.
+  try {
+    deregisterGroupRecords(jid);
+  } catch (err) {
+    logger.error({ jid, folder, err }, 'deregisterGroup DB cleanup failed');
+  }
+
+  // Drop in-memory state + tombstone the jid BEFORE the folder ref-count check
+  // below, so this jid is not counted as a surviving sibling.
+  delete registeredGroups[jid];
+  delete lastAgentTimestamp[jid];
+  deregisteredJids.add(jid);
+  if (deregisteredJids.size > 2000) {
+    const f = deregisteredJids.values().next().value;
+    if (f) deregisteredJids.delete(f);
+  }
+  saveState();
+
+  // Drop per-jid queue/runtime state (bounded growth for ephemeral channels).
+  queue.forget(jid);
+
+  // jid-scoped IPC namespace — always safe to remove.
+  try {
+    fs.rmSync(resolveGroupIpcPath(jid), { recursive: true, force: true });
+  } catch (err) {
+    logger.debug({ jid, err }, 'deregisterGroup IPC (jid) dir cleanup');
+  }
+
+  // Folder-scoped state (session row/dir, folder-keyed IPC snapshot dir) is
+  // SHARED across JIDs: diaries register the parent channel + every thread
+  // under ONE folder. Tear it down ONLY once the last sibling is gone, or we
+  // would wipe a still-live sibling's Claude session. (Tickets are 1:1, so the
+  // guard is always satisfied for them.)
+  const folderStillInUse = Object.values(registeredGroups).some(
+    (g) => g.folder === folder,
+  );
+  if (!folderStillInUse) {
+    try {
+      deleteSession(folder);
+    } catch {
+      // best-effort — session may already be gone
+    }
+    delete sessions[folder];
+    try {
+      fs.rmSync(path.join(DATA_DIR, 'sessions', folder), {
+        recursive: true,
+        force: true,
+      });
+    } catch (err) {
+      logger.debug({ folder, err }, 'deregisterGroup sessions dir cleanup');
+    }
+    try {
+      fs.rmSync(resolveGroupIpcPath(folder), { recursive: true, force: true });
+    } catch (err) {
+      logger.debug({ folder, err }, 'deregisterGroup IPC (folder) dir cleanup');
+    }
+  }
+
+  logger.info(
+    { jid, folder, folderStillInUse },
+    'Group deregistered (folder preserved)',
+  );
 }
 
 /**
@@ -613,6 +709,32 @@ async function backfillUnregisteredChannels(): Promise<void> {
       );
     }
   }
+
+  // Phase 3 (reconcile): deregister ticket/diary groups whose Discord channel
+  // was deleted (10003) while NanoClaw was down — recovers ChannelDelete events
+  // missed during the restart window.
+  //
+  // SAFETY: probeChannelGone returns true ONLY on a Discord 10003 (Unknown
+  // Channel) response. A diary that was merely moved to a dormant category
+  // still resolves via channels.fetch (returns false), so it is never torn
+  // down here. Any probe error leaves the group untouched.
+  let reconciled = 0;
+  for (const [jid, group] of Object.entries(registeredGroups)) {
+    const isTicket = /^discord_tickets_ch/.test(group.folder);
+    const isDiary = group.folder.startsWith('diaries/');
+    if (!isTicket && !isDiary) continue;
+    const ch = channels.find((c) => c.ownsJid(jid));
+    if (!ch || !ch.probeChannelGone) continue;
+    try {
+      if (await ch.probeChannelGone(jid)) {
+        deregisterGroup(jid);
+        reconciled++;
+      }
+    } catch {
+      /* probe error — leave the group untouched */
+    }
+  }
+  logger.info({ reconciled }, 'Lifecycle reconcile complete');
 }
 
 async function startMessageLoop(): Promise<void> {
@@ -1243,6 +1365,7 @@ async function main(): Promise<void> {
       group: RegisteredGroup,
       templateFolder?: string,
     ) => registerGroup(jid, group, templateFolder),
+    deregisterGroup: (jid: string) => deregisterGroup(jid),
     defaultTrigger: () => DEFAULT_TRIGGER,
   };
 

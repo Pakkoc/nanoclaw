@@ -267,7 +267,8 @@ db.prepare(\`
 console.log('등록 완료: dc:' + process.argv[1]);
 " "$NEW_CHANNEL_ID" "$CHANNEL_NAME" || log "WARNING: 그룹 등록 실패 (이미 등록됐거나 권한 문제) — 계속 진행"
 
-TEMPLATE_CLAUDE="/workspace/project/groups/diaries/discord_diary_ch1472986187294703726/CLAUDE.md"
+# canonical 다이어리 템플릿(호스트 registerGroup 과 동일 소스) 사용, 학생 폴더를 템플릿으로 쓰지 않음.
+TEMPLATE_CLAUDE="/workspace/project/groups/discord_diary/CLAUDE.md"
 TARGET_DIR="/workspace/project/groups/diaries/discord_diary_ch${NEW_CHANNEL_ID}"
 mkdir -p "$TARGET_DIR" || log "WARNING: 디렉토리 생성 실패 — 계속 진행"
 if [ -f "$TEMPLATE_CLAUDE" ]; then

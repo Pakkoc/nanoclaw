@@ -119,6 +119,7 @@ function createTestOpts(
       },
     })),
     registerGroup: vi.fn(),
+    deregisterGroup: vi.fn(),
     defaultTrigger: vi.fn(() => '@Andy'),
     ...overrides,
   };

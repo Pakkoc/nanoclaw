@@ -14,6 +14,7 @@ export interface ChannelOpts {
     group: RegisteredGroup,
     templateFolder?: string,
   ) => void;
+  deregisterGroup: (jid: string) => void;
   defaultTrigger: () => string;
 }
 

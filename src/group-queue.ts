@@ -60,6 +60,23 @@ export class GroupQueue {
     this.processMessagesFn = fn;
   }
 
+  /**
+   * Forget a deregistered group's per-group state so the groups Map does not
+   * grow without bound as ephemeral ticket/diary channels come and go. No-op
+   * while a container is still active (the tombstone in registerGroup prevents
+   * re-registration; the entry is harmless until the run finishes).
+   */
+  forget(groupJid: string): void {
+    const state = this.groups.get(groupJid);
+    if (!state) return;
+    if (state.active) {
+      logger.debug({ groupJid }, 'forget skipped — group still active');
+      return;
+    }
+    this.groups.delete(groupJid);
+    this.waitingGroups = this.waitingGroups.filter((g) => g !== groupJid);
+  }
+
   enqueueMessageCheck(groupJid: string): void {
     if (this.shuttingDown) return;
 
