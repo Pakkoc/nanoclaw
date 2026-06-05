@@ -719,15 +719,26 @@ async function backfillUnregisteredChannels(): Promise<void> {
       );
     }
   }
+}
 
-  // Phase 3 (reconcile): deregister ticket/diary groups whose Discord channel
-  // was deleted (10003) while NanoClaw was down — recovers ChannelDelete events
-  // missed during the restart window.
-  //
-  // SAFETY: probeChannelGone returns true ONLY on a Discord 10003 (Unknown
-  // Channel) response. A diary that was merely moved to a dormant category
-  // still resolves via channels.fetch (returns false), so it is never torn
-  // down here. Any probe error leaves the group untouched.
+/**
+ * Background GC: deregister ticket/diary groups whose Discord channel was
+ * deleted (10003) while NanoClaw was down — recovers ChannelDelete events
+ * missed during the restart window.
+ *
+ * Runs OUTSIDE the startup critical path (NOT awaited before startMessageLoop):
+ * probing hundreds of channels through the rate-limited Discord API can take
+ * minutes, and blocking here would freeze all message processing on boot.
+ *
+ * SAFETY: probeChannelGone returns true ONLY on a Discord 10003 (Unknown
+ * Channel) response. A diary merely moved to a dormant category still resolves
+ * via channels.fetch (returns false), so it is never torn down here. Any probe
+ * error leaves the group untouched.
+ */
+async function reconcileDeletedChannels(): Promise<void> {
+  // Let the bot settle and serve live traffic before the heavy probe sweep.
+  await new Promise((resolve) => setTimeout(resolve, 30_000));
+
   let reconciled = 0;
   for (const [jid, group] of Object.entries(registeredGroups)) {
     const isTicket = /^discord_tickets_ch/.test(group.folder);
@@ -1462,6 +1473,11 @@ async function main(): Promise<void> {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
     process.exit(1);
   });
+  // Dead-channel GC runs in the BACKGROUND so it never delays message
+  // processing on boot (it probes hundreds of channels and can take minutes).
+  reconcileDeletedChannels().catch((err) =>
+    logger.error({ err }, 'Lifecycle reconcile failed'),
+  );
 }
 
 // Guard: only run when executed directly, not when imported by tests
