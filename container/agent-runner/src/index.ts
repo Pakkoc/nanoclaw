@@ -423,34 +423,11 @@ async function runQuery(
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
 
-  // Diary channels only: load a per-channel persona overlay if the channel
-  // owner has set one. Wrapped in an XML tag so the model treats it as a
-  // user-provided style overlay, not as a system-level directive — contains
-  // prompt-injection attempts inside a tagged block that soul.md rules can
-  // explicitly reference. Hard caps at 8KB to keep tokens bounded.
-  let personaOverlay: string | undefined;
-  const groupFolder = containerInput.groupFolder || '';
-  const isDiary = groupFolder.startsWith('diaries/');
-  if (isDiary && !containerInput.isMain) {
-    const personaPath = '/workspace/group/persona.md';
-    if (fs.existsSync(personaPath)) {
-      try {
-        const raw = fs.readFileSync(personaPath, 'utf-8').trim();
-        if (raw && raw.length <= 8000) {
-          personaOverlay = `<channel_persona_overlay>\n${raw}\n</channel_persona_overlay>`;
-          log(`Persona overlay loaded (${raw.length} bytes)`);
-        } else if (raw.length > 8000) {
-          log(`Persona overlay skipped: exceeds 8KB limit (${raw.length} bytes)`);
-        }
-      } catch (err) {
-        log(`Persona overlay read failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
-  }
+  // Per-channel persona overlays were removed: every diary channel now follows
+  // the single global 부엉이 persona (groups/global/soul.md). No persona.md is
+  // loaded, and any persona.md left in a group folder is ignored.
 
-  const systemAppend = [globalClaudeMd, personaOverlay]
-    .filter(Boolean)
-    .join('\n\n---\n\n');
+  const systemAppend = globalClaudeMd;
 
   // Discover additional directories mounted at /workspace/extra/*
   // These are passed to the SDK so their CLAUDE.md files are loaded automatically

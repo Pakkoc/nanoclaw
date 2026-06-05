@@ -298,6 +298,46 @@ async function buildContainerArgs(
   return args;
 }
 
+// Diary channels follow the single global 부엉이 persona — tone/nickname must
+// not be personalized per channel. Before each spawn we strip any tone/nickname
+// section the agent may have written into its memories.md (e.g. "## 호칭·말투").
+// This runs at spawn-prep time, when no container for this group is active
+// (the host serializes per group and pipes into a live container instead of
+// spawning a second one), so the in-place rewrite cannot race a live writer.
+const TONE_SECTION_HEADER = /^#{1,6}\s*(호칭|말투|페르소나|persona|tone)/i;
+
+function sanitizeDiaryMemories(groupDir: string): void {
+  const memPath = path.join(groupDir, 'memories.md');
+  let raw: string;
+  try {
+    raw = fs.readFileSync(memPath, 'utf-8');
+  } catch {
+    return; // no memories.md yet — nothing to sanitize
+  }
+  const kept: string[] = [];
+  let skipping = false;
+  for (const line of raw.split('\n')) {
+    if (/^#{1,6}\s/.test(line)) {
+      // A markdown header line resets the skip state: skip this section only
+      // if the header names a tone/nickname/persona topic.
+      skipping = TONE_SECTION_HEADER.test(line);
+    }
+    if (!skipping) kept.push(line);
+  }
+  const cleaned = kept.join('\n');
+  if (cleaned !== raw) {
+    try {
+      fs.writeFileSync(memPath, cleaned, 'utf-8');
+      logger.info(
+        { groupDir },
+        'Stripped tone/persona section from diary memories.md',
+      );
+    } catch (err) {
+      logger.warn({ groupDir, err }, 'Failed to sanitize diary memories.md');
+    }
+  }
+}
+
 export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
@@ -308,6 +348,12 @@ export async function runContainerAgent(
 
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
+
+  // Diary channels: enforce the global persona by removing any per-channel
+  // tone/nickname overrides from memories.md before the agent reads it.
+  if (group.folder.startsWith('diaries/')) {
+    sanitizeDiaryMemories(groupDir);
+  }
 
   const mounts = buildVolumeMounts(group, input.isMain, input.chatJid);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');

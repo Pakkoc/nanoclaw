@@ -51,3 +51,6 @@ groups/**/persona.md
 .nanoclaw/
 
 agents-sdk-docs
+
+# Local pre-change backups (runtime, not for VCS)
+backups/
