@@ -299,9 +299,7 @@ function deregisterGroup(jid: string): void {
   // under ONE folder. Tear it down ONLY once the last sibling is gone, or we
   // would wipe a still-live sibling's Claude session. (Tickets are 1:1, so the
   // guard is always satisfied for them.)
-  const folderStillInUse = Object.values(registeredGroups).some(
-    (g) => g.folder === folder,
-  );
+  const folderStillInUse = folderStillRegistered(folder);
   if (!folderStillInUse) {
     try {
       deleteSession(folder);
@@ -353,6 +351,18 @@ export function _setRegisteredGroups(
   groups: Record<string, RegisteredGroup>,
 ): void {
   registeredGroups = groups;
+}
+
+/**
+ * Folder ref-count guard: returns true if any currently-registered group still
+ * points at the given folder. Used by deregisterGroup to decide whether
+ * folder-scoped state (Claude session, folder-keyed IPC) is safe to tear down.
+ * Diaries share ONE folder across the parent channel + every thread, so the
+ * folder must survive until the last sibling is gone. Tickets are 1:1, so this
+ * is always false once their single jid is removed.
+ */
+export function folderStillRegistered(folder: string): boolean {
+  return Object.values(registeredGroups).some((g) => g.folder === folder);
 }
 
 /**

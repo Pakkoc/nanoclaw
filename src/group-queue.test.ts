@@ -481,4 +481,157 @@ describe('GroupQueue', () => {
     resolveProcess!();
     await vi.advanceTimersByTimeAsync(10);
   });
+
+  // --- forget(groupJid) ---
+
+  describe('forget', () => {
+    it('removes an inactive group so it is not drained from the waiting list', async () => {
+      const processed: string[] = [];
+      const completionCallbacks: Array<() => void> = [];
+
+      const processMessages = vi.fn(async (groupJid: string) => {
+        processed.push(groupJid);
+        await new Promise<void>((resolve) => completionCallbacks.push(resolve));
+        return true;
+      });
+
+      queue.setProcessMessagesFn(processMessages);
+
+      // Fill both active slots (MAX_CONCURRENT_CONTAINERS = 2)
+      queue.enqueueMessageCheck('group1@g.us');
+      queue.enqueueMessageCheck('group2@g.us');
+      await vi.advanceTimersByTimeAsync(10);
+
+      // group3 is over the limit — gets queued into waitingGroups, inactive
+      queue.enqueueMessageCheck('group3@g.us');
+      await vi.advanceTimersByTimeAsync(10);
+      expect(processed).toEqual(['group1@g.us', 'group2@g.us']);
+
+      // Forget the inactive, waiting group3 — its state entry is dropped
+      queue.forget('group3@g.us');
+
+      // Free a slot — drainWaiting should NOT pick up the forgotten group
+      completionCallbacks[0]();
+      await vi.advanceTimersByTimeAsync(10);
+
+      expect(processed).not.toContain('group3@g.us');
+    });
+
+    it('drops accumulated retry state so a re-enqueue starts fresh', async () => {
+      let callCount = 0;
+      let nextResult = false;
+
+      const processMessages = vi.fn(async () => {
+        callCount++;
+        return nextResult;
+      });
+
+      queue.setProcessMessagesFn(processMessages);
+
+      // Initial failing run accumulates retryCount and schedules a retry
+      queue.enqueueMessageCheck('group1@g.us');
+      await vi.advanceTimersByTimeAsync(10);
+      expect(callCount).toBe(1);
+
+      // Group is now inactive (run finished, retry pending) — forget it.
+      // This deletes the GroupState, discarding retryCount. The scheduled
+      // retry's enqueue will recreate fresh state.
+      queue.forget('group1@g.us');
+
+      // Subsequent runs succeed; confirm the retry sequence resumes cleanly
+      // (no throw, container still runs) after the state was forgotten.
+      nextResult = true;
+      await vi.advanceTimersByTimeAsync(5000 + 10);
+      expect(callCount).toBe(2);
+
+      // A brand-new enqueue runs immediately with no leftover backoff state
+      queue.enqueueMessageCheck('group1@g.us');
+      await vi.advanceTimersByTimeAsync(10);
+      expect(callCount).toBe(3);
+    });
+
+    it('keeps the entry for an active group (skips while a container runs)', async () => {
+      const processed: string[] = [];
+      let resolveProcess: () => void;
+
+      const processMessages = vi.fn(async (groupJid: string) => {
+        processed.push(groupJid);
+        await new Promise<void>((resolve) => {
+          resolveProcess = resolve;
+        });
+        return true;
+      });
+
+      queue.setProcessMessagesFn(processMessages);
+
+      // Start a container for group1 (becomes active)
+      queue.enqueueMessageCheck('group1@g.us');
+      await vi.advanceTimersByTimeAsync(10);
+      expect(processed).toEqual(['group1@g.us']);
+
+      // Queue a follow-up message while active
+      queue.enqueueMessageCheck('group1@g.us');
+
+      // forget while active is a no-op — state (incl. pendingMessages) is kept
+      queue.forget('group1@g.us');
+
+      // Finish the running container — pending message must still drain,
+      // proving the entry was not removed mid-run.
+      resolveProcess!();
+      await vi.advanceTimersByTimeAsync(10);
+
+      expect(processed).toEqual(['group1@g.us', 'group1@g.us']);
+    });
+
+    it('is a no-op for an unknown jid and idempotent on repeated calls', () => {
+      expect(() => queue.forget('never-seen@g.us')).not.toThrow();
+      expect(() => queue.forget('never-seen@g.us')).not.toThrow();
+
+      // Touch a group then forget it twice — second call must not throw
+      queue.setProcessMessagesFn(vi.fn(async () => true));
+      queue.enqueueTask(
+        'group1@g.us',
+        'task-1',
+        vi.fn(async () => {}),
+      );
+      // (task started/finished synchronously-ish under fake timers — group inactive)
+      expect(() => queue.forget('group1@g.us')).not.toThrow();
+      expect(() => queue.forget('group1@g.us')).not.toThrow();
+    });
+
+    it('removes a forgotten jid from waitingGroups so a freed slot skips it but serves others', async () => {
+      const processed: string[] = [];
+      const completionCallbacks: Array<() => void> = [];
+
+      const processMessages = vi.fn(async (groupJid: string) => {
+        processed.push(groupJid);
+        await new Promise<void>((resolve) => completionCallbacks.push(resolve));
+        return true;
+      });
+
+      queue.setProcessMessagesFn(processMessages);
+
+      // Fill both slots
+      queue.enqueueMessageCheck('group1@g.us');
+      queue.enqueueMessageCheck('group2@g.us');
+      await vi.advanceTimersByTimeAsync(10);
+
+      // Two groups wait in line: group3 (forgotten) then group4 (kept)
+      queue.enqueueMessageCheck('group3@g.us');
+      queue.enqueueMessageCheck('group4@g.us');
+      await vi.advanceTimersByTimeAsync(10);
+      expect(processed).toEqual(['group1@g.us', 'group2@g.us']);
+
+      // Forget group3 — it should be pulled out of waitingGroups
+      queue.forget('group3@g.us');
+
+      // Free both slots — group4 should run, group3 must be skipped entirely
+      completionCallbacks[0]();
+      completionCallbacks[1]();
+      await vi.advanceTimersByTimeAsync(10);
+
+      expect(processed).toContain('group4@g.us');
+      expect(processed).not.toContain('group3@g.us');
+    });
+  });
 });

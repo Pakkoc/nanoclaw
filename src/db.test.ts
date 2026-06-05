@@ -3,12 +3,17 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   _initTestDatabase,
   createTask,
+  deleteChat,
+  deleteMessagesForChat,
+  deleteRegisteredGroup,
   deleteTask,
+  deregisterGroupRecords,
   getAllChats,
   getAllRegisteredGroups,
   getLastBotMessageTimestamp,
   getMessagesSince,
   getNewMessages,
+  getRegisteredGroup,
   getTaskById,
   setRegisteredGroup,
   storeChatMetadata,
@@ -648,5 +653,100 @@ describe('registered group isMain', () => {
     const group = groups['group@g.us'];
     expect(group).toBeDefined();
     expect(group.isMain).toBeUndefined();
+  });
+});
+
+// --- deregister helpers ---
+
+describe('deregister group records', () => {
+  // Seed two independent jids, each with a chat + messages + registered_groups
+  // row, so we can prove deletion is scoped to a single jid.
+  beforeEach(() => {
+    storeChatMetadata('dc:A', '2024-01-01T00:00:00.000Z', 'Group A');
+    storeChatMetadata('dc:B', '2024-01-01T00:00:00.000Z', 'Group B');
+
+    store({
+      id: 'a-msg-1',
+      chat_jid: 'dc:A',
+      sender: 'user@dc',
+      sender_name: 'AliceA',
+      content: 'a first',
+      timestamp: '2024-01-01T00:00:01.000Z',
+    });
+    store({
+      id: 'a-msg-2',
+      chat_jid: 'dc:A',
+      sender: 'user@dc',
+      sender_name: 'AliceA',
+      content: 'a second',
+      timestamp: '2024-01-01T00:00:02.000Z',
+    });
+    store({
+      id: 'b-msg-1',
+      chat_jid: 'dc:B',
+      sender: 'user@dc',
+      sender_name: 'BobB',
+      content: 'b first',
+      timestamp: '2024-01-01T00:00:01.000Z',
+    });
+
+    setRegisteredGroup('dc:A', {
+      name: 'Group A',
+      folder: 'discord_a',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+    });
+    setRegisteredGroup('dc:B', {
+      name: 'Group B',
+      folder: 'discord_b',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+    });
+  });
+
+  it('deregisterGroupRecords removes only the target jid, leaving siblings intact', () => {
+    deregisterGroupRecords('dc:A');
+
+    // dc:A: messages, chat, and registered_groups row all gone
+    expect(getMessagesSince('dc:A', '', 'Andy')).toHaveLength(0);
+    expect(getAllChats().some((c) => c.jid === 'dc:A')).toBe(false);
+    expect(getRegisteredGroup('dc:A')).toBeUndefined();
+
+    // dc:B: untouched
+    expect(getMessagesSince('dc:B', '', 'Andy')).toHaveLength(1);
+    expect(getAllChats().some((c) => c.jid === 'dc:B')).toBe(true);
+    const groupB = getRegisteredGroup('dc:B');
+    expect(groupB).toBeDefined();
+    expect(groupB!.folder).toBe('discord_b');
+  });
+
+  it('is idempotent: a second deregister of the same jid is a no-op without throwing', () => {
+    deregisterGroupRecords('dc:A');
+    expect(() => deregisterGroupRecords('dc:A')).not.toThrow();
+
+    // Still gone, and the sibling survived both calls
+    expect(getRegisteredGroup('dc:A')).toBeUndefined();
+    expect(getAllChats().some((c) => c.jid === 'dc:A')).toBe(false);
+    expect(getRegisteredGroup('dc:B')).toBeDefined();
+  });
+
+  it('deletes messages before the chat so the FK (foreign_keys=ON) is not violated', () => {
+    // better-sqlite3 enables PRAGMA foreign_keys by default. Deleting the chat
+    // first while messages still reference it would raise a constraint error;
+    // deregisterGroupRecords must order DELETEs child-first.
+    expect(() => deregisterGroupRecords('dc:A')).not.toThrow();
+
+    // No orphaned messages: dc:A messages are gone, no dc:A chat remains.
+    expect(getMessagesSince('dc:A', '', 'Andy')).toHaveLength(0);
+    expect(getAllChats().some((c) => c.jid === 'dc:A')).toBe(false);
+
+    // Deleting the chat directly while its messages still exist must fail the FK,
+    // confirming foreign_keys is actually enforced (the ordering matters).
+    expect(() => deleteChat('dc:B')).toThrow();
+    // And the standalone child-first helper succeeds for that same jid.
+    deleteMessagesForChat('dc:B');
+    expect(() => deleteChat('dc:B')).not.toThrow();
+    deleteRegisteredGroup('dc:B');
+    expect(getRegisteredGroup('dc:B')).toBeUndefined();
   });
 });
