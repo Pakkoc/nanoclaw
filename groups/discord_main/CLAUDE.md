@@ -339,6 +339,29 @@ If a user wants tasks running more than ~2x daily and a script can't reduce agen
 - **ticket-\* 패턴 (티켓 카테고리 1227530533567991881)**: 멘션 없이 응답. 일반 멤버 대상이라 친절하게.
 - **그 외 모든 채널**: 멘션/호출과 무관하게 **절대 침묵**. 토큰 절약용.
 
+### 기숙사 변경 이력 확인
+
+기숙사 변경은 **1회만** 허용. 관리자가 특정 유저의 기숙사 변경을 요청하거나 변경 이력을 물으면, **반드시 먼저** 아래 채널의 메시지를 조회해서 해당 유저의 변경 이력을 확인해라.
+
+**기숙사 변경 문의 채널**: `1514124242952781854` (🏘️ 기숙사 변경 문의)
+
+```bash
+source /workspace/global/tools.env
+curl -s -H "Authorization: Bot $DISCORD_BOT_TOKEN" -H "User-Agent: DiscordBot/1.0" \
+  "https://discord.com/api/v10/channels/1514124242952781854/messages?limit=100" \
+  | python3 -c "
+import json, sys
+msgs = json.load(sys.stdin)
+user_id = '<확인할_USER_ID>'
+for m in msgs:
+    if user_id in m.get('content', '') or user_id in str(m.get('mentions', [])):
+        print(m['timestamp'][:16], m['content'][:200])
+"
+```
+
+- 이력 있음 → "이미 변경 이력이 있어요" 보고 후 관리자 판단 대기
+- 이력 없음 → 변경 진행 가능
+
 ### 다이어리 생성 워크플로우
 
 티켓 채널에서 "다이어리 생성/만들어주세요" 류 요청이 오면 한 줄 bash만 실행:
