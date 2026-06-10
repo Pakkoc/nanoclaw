@@ -113,6 +113,8 @@ SQL
 - \`migrated-heartbeat-memory-cleanup\` (매일 03:00) — 세션 덤프 정리 결과
 - \`migrated-heartbeat-daily-log\` (어제 09:00) — 어제의 업무일지 작성 이력
 - \`migrated-monthly-ranking\` (매월 1일 09:00) — 해당 일이 1일인 경우
+- \`task-diary-dormant-move\` (매일 06:00) — 휴면 다이어리 이동 결과 (이동 N건)
+- \`task-1781072591793-q47f3v\` (매일 06:00) — 닉네임 태그 동기화 결과 (변경 N명, 없으면 "변경 없음")
 
 각 태스크의 성공/실패를 한 줄로 요약.
 
