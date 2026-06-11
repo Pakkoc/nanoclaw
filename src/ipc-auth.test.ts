@@ -8,7 +8,7 @@ import {
   getTaskById,
   setRegisteredGroup,
 } from './db.js';
-import { processTaskIpc, IpcDeps } from './ipc.js';
+import { processTaskIpc, resolveIpcSourceIdentity, IpcDeps } from './ipc.js';
 import { RegisteredGroup } from './types.js';
 
 // Set up registered groups used across tests
@@ -382,57 +382,112 @@ describe('refresh_groups authorization', () => {
   });
 });
 
+// --- IPC source identity resolution ---
+// Namespace dirs are sanitized JIDs; authorization must resolve them back to
+// the registered group. Regression guard for the bug where the raw dir name
+// was compared against group folders, blocking every container send.
+
+describe('resolveIpcSourceIdentity', () => {
+  it('maps sanitized-JID dirs to their registered group', () => {
+    expect(resolveIpcSourceIdentity('main_g_us', groups)).toEqual({
+      jid: 'main@g.us',
+      folder: 'whatsapp_main',
+      isMain: true,
+    });
+    expect(resolveIpcSourceIdentity('other_g_us', groups)).toEqual({
+      jid: 'other@g.us',
+      folder: 'other-group',
+      isMain: false,
+    });
+  });
+
+  it('regression: discord-style jid dir for main resolves as main', () => {
+    const discordGroups: Record<string, RegisteredGroup> = {
+      'dc:1489283292489449585': { ...MAIN_GROUP, folder: 'discord_main' },
+    };
+    expect(
+      resolveIpcSourceIdentity('dc_1489283292489449585', discordGroups),
+    ).toEqual({
+      jid: 'dc:1489283292489449585',
+      folder: 'discord_main',
+      isMain: true,
+    });
+  });
+
+  it('falls back to folder semantics for legacy dirs', () => {
+    expect(resolveIpcSourceIdentity('whatsapp_main', groups)).toEqual({
+      folder: 'whatsapp_main',
+      isMain: true,
+    });
+  });
+
+  it('unknown dirs resolve as non-main with dir name as folder', () => {
+    expect(resolveIpcSourceIdentity('stale-dir', groups)).toEqual({
+      folder: 'stale-dir',
+      isMain: false,
+    });
+  });
+});
+
 // --- IPC message authorization ---
-// Tests the authorization pattern from startIpcWatcher (ipc.ts).
-// The logic: isMain || (targetGroup && targetGroup.folder === sourceGroup)
+// Tests the authorization chain from startIpcWatcher (ipc.ts): dir name →
+// resolveIpcSourceIdentity → isMain || chatJid === sourceJid ||
+// (targetGroup && targetGroup.folder === sourceFolder)
 
 describe('IPC message authorization', () => {
-  // Replicate the exact check from the IPC watcher
+  // Replicate the exact check from the IPC watcher, fed by the real resolver
   function isMessageAuthorized(
-    sourceGroup: string,
-    isMain: boolean,
+    sourceDir: string,
     targetChatJid: string,
     registeredGroups: Record<string, RegisteredGroup>,
   ): boolean {
+    const {
+      jid: sourceJid,
+      folder: sourceFolder,
+      isMain,
+    } = resolveIpcSourceIdentity(sourceDir, registeredGroups);
     const targetGroup = registeredGroups[targetChatJid];
-    return isMain || (!!targetGroup && targetGroup.folder === sourceGroup);
+    return (
+      isMain ||
+      targetChatJid === sourceJid ||
+      (!!targetGroup && targetGroup.folder === sourceFolder)
+    );
   }
 
-  it('main group can send to any group', () => {
-    expect(
-      isMessageAuthorized('whatsapp_main', true, 'other@g.us', groups),
-    ).toBe(true);
-    expect(
-      isMessageAuthorized('whatsapp_main', true, 'third@g.us', groups),
-    ).toBe(true);
+  it('main group can send to any group from its jid-named dir', () => {
+    expect(isMessageAuthorized('main_g_us', 'other@g.us', groups)).toBe(true);
+    expect(isMessageAuthorized('main_g_us', 'third@g.us', groups)).toBe(true);
+    expect(isMessageAuthorized('main_g_us', 'main@g.us', groups)).toBe(true);
   });
 
-  it('non-main group can send to its own chat', () => {
-    expect(
-      isMessageAuthorized('other-group', false, 'other@g.us', groups),
-    ).toBe(true);
+  it('non-main group can send to its own chat from its jid-named dir', () => {
+    expect(isMessageAuthorized('other_g_us', 'other@g.us', groups)).toBe(true);
   });
 
   it('non-main group cannot send to another groups chat', () => {
-    expect(isMessageAuthorized('other-group', false, 'main@g.us', groups)).toBe(
-      false,
-    );
-    expect(
-      isMessageAuthorized('other-group', false, 'third@g.us', groups),
-    ).toBe(false);
+    expect(isMessageAuthorized('other_g_us', 'main@g.us', groups)).toBe(false);
+    expect(isMessageAuthorized('other_g_us', 'third@g.us', groups)).toBe(false);
   });
 
   it('non-main group cannot send to unregistered JID', () => {
-    expect(
-      isMessageAuthorized('other-group', false, 'unknown@g.us', groups),
-    ).toBe(false);
+    expect(isMessageAuthorized('other_g_us', 'unknown@g.us', groups)).toBe(
+      false,
+    );
   });
 
   it('main group can send to unregistered JID', () => {
     // Main is always authorized regardless of target
-    expect(
-      isMessageAuthorized('whatsapp_main', true, 'unknown@g.us', groups),
-    ).toBe(true);
+    expect(isMessageAuthorized('main_g_us', 'unknown@g.us', groups)).toBe(true);
+  });
+
+  it('legacy folder-named dirs keep their original semantics', () => {
+    expect(isMessageAuthorized('whatsapp_main', 'other@g.us', groups)).toBe(
+      true,
+    );
+    expect(isMessageAuthorized('other-group', 'other@g.us', groups)).toBe(true);
+    expect(isMessageAuthorized('other-group', 'third@g.us', groups)).toBe(
+      false,
+    );
   });
 });
 
