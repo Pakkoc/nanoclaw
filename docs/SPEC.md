@@ -641,7 +641,7 @@ NanoClaw runs as a single macOS launchd service.
 ### Startup Sequence
 
 When NanoClaw starts, it:
-1. **Ensures container runtime is running** - Automatically starts it if needed; kills orphaned NanoClaw containers from previous runs
+1. **Ensures container runtime is running** - Automatically starts it if needed; kills orphaned containers from previous runs of this install (matched via the `nanoclaw.instance` ownership label — never by name, so co-installed NanoClaw copies cannot kill each other's containers)
 2. Initializes the SQLite database (migrates from JSON files if they exist)
 3. Loads state from SQLite (registered groups, sessions, router state)
 4. **Connects channels** — loops through registered channels, instantiates those with credentials, calls `connect()` on each

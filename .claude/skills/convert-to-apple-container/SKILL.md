@@ -11,7 +11,7 @@ This skill switches NanoClaw's container runtime from Docker to Apple Container 
 - Container runtime binary: `docker` → `container`
 - Mount syntax: `-v path:path:ro` → `--mount type=bind,source=...,target=...,readonly`
 - Startup check: `docker info` → `container system status` (with auto-start)
-- Orphan detection: `docker ps --filter` → `container ls --format json`
+- Orphan detection: `docker ps --filter label=nanoclaw.instance=<install-path>` → `container ls --format json` (Apple Container has no label filter — parse the JSON and match the `nanoclaw.instance` label, or fall back to exact-name tracking; do NOT match by the `nanoclaw-` name prefix, which kills other installs' containers)
 - Build script default: `docker` → `container`
 - Dockerfile entrypoint: `.env` shadowing via `mount --bind` inside the container (Apple Container only supports directory mounts, not file mounts like Docker's `/dev/null` overlay)
 - Container runner: main-group containers start as root for `mount --bind`, then drop privileges via `setpriv`

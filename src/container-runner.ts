@@ -21,6 +21,7 @@ import { logger } from './logger.js';
 import {
   CONTAINER_RUNTIME_BIN,
   hostGatewayArgs,
+  instanceLabelArgs,
   readonlyMountArgs,
   stopContainer,
 } from './container-runtime.js';
@@ -252,7 +253,14 @@ async function buildContainerArgs(
   containerName: string,
   agentIdentifier?: string,
 ): Promise<string[]> {
-  const args: string[] = ['run', '-i', '--rm', '--name', containerName];
+  const args: string[] = [
+    'run',
+    '-i',
+    '--rm',
+    '--name',
+    containerName,
+    ...instanceLabelArgs(),
+  ];
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);

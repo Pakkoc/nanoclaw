@@ -42,9 +42,13 @@ Personal Claude assistant. See [README.md](README.md) for philosophy and setup. 
 
 ### 외부 의존 서비스 (NanoClaw 바깥)
 
-- **`gaegul-dashboard`** (PM2) — `/home/s980903/openclaw/workspace/dashboard/server.js`. 09:30 node-cron으로 업무일지 이메일 발송 (Gmail SMTP → `REPORT_RECIPIENT`). `~/openclaw/workspace/memory/YYYY/MM/YYYY-MM-DD.md` 경로에서 파일을 읽는데, NanoClaw는 `~/nanoclaw/groups/discord_main/daily-memories/` 에 쓰므로 **경로 연결(심볼릭 링크 또는 dashboard 코드 변경)이 필요**. 아직 미해결 상태
-- **다른 PM2 봇 11개** (`01-team-finder`, `02-fox-coin`, `03_bot`, `crypto-arb`, `discord-bot`, `gaegul-dashboard`, `lavalink`, `music-bot`, `ngrok-arb` 등) — 시스템 Node 18에 의존. **절대 건드리지 말 것**. Node 기본 버전 변경 금지
-- **구 OpenClaw 설치**: `~/.openclaw` (에이전트 상태), `~/openclaw` (dashboard + 스킬 원본). 마이그레이션 검증 완료되면 정리 가능
+- **`gaegul-dashboard`** (PM2) — 현재는 `~/nanoclaw/dashboard/server.js`를 실행한다 (구 `~/openclaw/workspace/dashboard` 경로 아님). 모니터링 대시보드 + 09:30 node-cron 업무일지 이메일 발송 (Gmail SMTP → `REPORT_RECIPIENT`). 업무일지는 `~/nanoclaw/groups/discord_main/daily-memories/`에서 직접 읽으므로 구버전의 "경로 연결 필요" 문제는 해소됨. docker ps 조회는 표시 전용 (stop/kill 없음)
+- **다른 PM2 봇 8개** (`01-team-finder`, `02-fox-coin`, `03_bot`, `04-킬내기모집`, `05-쌀알봇`, `discord-bot`, `lavalink`, `music-bot`) — 시스템 Node 18에 의존. **절대 건드리지 말 것**. Node 기본 버전 변경 금지 (`crypto-arb`, `ngrok-arb`는 PM2에서 제거됨)
+- **구 OpenClaw 설치**: `~/.openclaw`, `~/openclaw` 모두 삭제 완료 (2026-06 확인)
+
+### ⚠️ 컨테이너 소유권 규칙 (2026-06-11 사고 이후)
+
+`/home/s980903/claw/moimmoim-bot`(별도 NanoClaw 복사본)이 invalid Discord 토큰으로 5초마다 크래시-재시작하며, 매 시작 시 `cleanupOrphans()`가 `name=nanoclaw-` 필터로 **본가의 실행 중 에이전트 컨테이너를 전부 살해** → 전 채널 응답 불가가 발생했다 (해당 봇은 삭제됨). 재발 방지로 컨테이너 소유권은 이제 **`nanoclaw.instance=<설치경로>` 도커 라벨**로 식별한다 (`src/container-runtime.ts`). 같은 호스트에 NanoClaw 계열을 추가 설치할 경우, 그 복사본도 이 라벨 방식 커밋을 포함해야 하며 이름 프리픽스로 컨테이너를 정리하는 구버전 코드를 절대 돌리면 안 된다. 이 변경을 라벨 없는 컨테이너가 살아 있는 호스트에 새로 배포할 때는 구 서비스 중지 상태에서 `docker ps --filter name=nanoclaw- --format '{{.Names}}' | xargs -r docker stop -t 1`을 1회 수동 실행할 것 (라벨 없는 컨테이너는 새 필터에 안 잡히고 스스로 종료되지도 않는다).
 
 ### Git 워크플로우
 

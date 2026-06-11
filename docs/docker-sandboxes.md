@@ -160,11 +160,7 @@ if (caCertSrc) {
 
 ### 4d. Container runtime — prevent self-termination
 
-In `src/container-runtime.ts`, the `cleanupOrphans()` function matches containers by the `nanoclaw-` prefix. Inside a sandbox, the sandbox container itself may match (e.g., `nanoclaw-docker-sandbox`). Filter out the current hostname:
-
-```typescript
-// In cleanupOrphans(), filter out os.hostname() from the list of containers to stop
-```
+In `src/container-runtime.ts`, the `cleanupOrphans()` function matches containers by the `nanoclaw.instance` ownership label (value = the install's working directory), not by the `nanoclaw-` name prefix. A sandbox container is therefore never claimed unless it was spawned by this same install path with the label attached. If you spawn the sandbox via `buildContainerArgs()` (which stamps the label), name it something distinctive and exclude it explicitly — or simply spawn it without the instance label so cleanup never sees it.
 
 ### 4e. Credential proxy — route through MITM proxy
 

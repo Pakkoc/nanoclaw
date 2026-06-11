@@ -55,6 +55,7 @@ vi.mock('./mount-security.js', () => ({
 vi.mock('./container-runtime.js', () => ({
   CONTAINER_RUNTIME_BIN: 'docker',
   hostGatewayArgs: () => [],
+  instanceLabelArgs: () => ['--label', 'nanoclaw.instance=/test/install'],
   readonlyMountArgs: (h: string, c: string) => ['-v', `${h}:${c}:ro`],
   stopContainer: vi.fn(),
 }));
@@ -104,6 +105,8 @@ vi.mock('child_process', async () => {
     ),
   };
 });
+
+import { spawn } from 'child_process';
 
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
@@ -225,5 +228,32 @@ describe('container-runner timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+  });
+
+  // Regression guard for the spawn half of the ownership invariant: every
+  // container must carry the instance label, or cleanupOrphans (which filters
+  // by that label) silently stops reaping anything this install spawns.
+  it('stamps spawned containers with the instance ownership label', async () => {
+    vi.mocked(spawn).mockClear();
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      vi.fn(async () => {}),
+    );
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(spawn).toHaveBeenCalledTimes(1);
+    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
+    expect(spawnArgs).toEqual(
+      expect.arrayContaining(['--label', 'nanoclaw.instance=/test/install']),
+    );
+
+    emitOutputMarker(fakeProc, { status: 'success', result: 'Done' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
   });
 });
