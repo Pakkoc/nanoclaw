@@ -96,6 +96,64 @@ const DIARY_DAILY_LIMIT = 10;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
+/**
+ * Reply watchdog: tracks channels where a visible reply is expected (a
+ * trigger mention, or any main-channel message). The agent's mid-query turns
+ * are never delivered — only final result text is — so a follow-up mention
+ * piped mid-composition can make it wrap up with an <internal>-only result
+ * and the user sees silence (observed 2026-06-11 in two diary channels).
+ * If no visible text reaches the channel in time, nudge the active container
+ * once; if it is gone, reprocess the batch; if still silent, raise an ERROR.
+ * Entries are cleared the moment visible text is actually sent.
+ */
+interface PendingReply {
+  since: number;
+  lastMsgTs: string;
+  nudged: boolean;
+}
+const pendingVisibleReply = new Map<string, PendingReply>();
+const REPLY_WATCHDOG_INTERVAL_MS = 60_000;
+const REPLY_NUDGE_AFTER_MS = 3 * 60_000;
+const REPLY_ALERT_AFTER_MS = 10 * 60_000;
+const REPLY_NUDGE_NOTE =
+  '<system-note>호스트 워치독 알림: 직전 멘션 메시지에 대한 가시적 응답이 아직 채널로 전송되지 않았습니다. 네가 대화 중간에 작성한 턴은 사용자에게 전달되지 않으며 최종 result 텍스트만 전송됩니다. "이미 답했다"고 판단하지 말고, 멘션에 대한 답변을 지금 응답 텍스트(최종 결과)로 출력해 주세요.</system-note>';
+
+function startReplyWatchdog(): void {
+  setInterval(() => {
+    const now = Date.now();
+    for (const [chatJid, pending] of pendingVisibleReply) {
+      const age = now - pending.since;
+      if (!pending.nudged && age > REPLY_NUDGE_AFTER_MS) {
+        pending.nudged = true;
+        if (queue.sendMessage(chatJid, REPLY_NUDGE_NOTE)) {
+          logger.warn(
+            { chatJid },
+            'Reply watchdog: no visible reply yet — nudged active container',
+          );
+        } else {
+          // Container already gone — roll the cursor back to just before the
+          // unanswered batch and reprocess it with a fresh container.
+          lastAgentTimestamp[chatJid] = new Date(
+            Date.parse(pending.lastMsgTs) - 1,
+          ).toISOString();
+          saveState();
+          queue.enqueueMessageCheck(chatJid);
+          logger.warn(
+            { chatJid },
+            'Reply watchdog: no visible reply and container gone — reprocessing batch',
+          );
+        }
+      } else if (pending.nudged && age > REPLY_ALERT_AFTER_MS) {
+        pendingVisibleReply.delete(chatJid);
+        logger.error(
+          { chatJid },
+          'Reply watchdog: still no visible reply after nudge — operator attention needed',
+        );
+      }
+    }
+  }, REPLY_WATCHDOG_INTERVAL_MS);
+}
+
 const onecli = new OneCLI({ url: ONECLI_URL });
 
 function ensureOneCLIAgent(jid: string, group: RegisteredGroup): void {
@@ -524,6 +582,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       if (text) {
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
+        pendingVisibleReply.delete(chatJid);
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
@@ -855,6 +914,17 @@ async function startMessageLoop(): Promise<void> {
               );
               continue;
             }
+          }
+
+          // Reply watchdog: a trigger mention (or any main-channel message)
+          // must eventually produce visible text in the channel. needsTrigger
+          // here implies hasTrigger passed above.
+          if (isMainGroup || needsTrigger) {
+            pendingVisibleReply.set(chatJid, {
+              since: Date.now(),
+              lastMsgTs: groupMessages[groupMessages.length - 1].timestamp,
+              nudged: false,
+            });
           }
 
           // Pull all messages since lastAgentTimestamp so non-trigger
@@ -1432,6 +1502,8 @@ async function main(): Promise<void> {
     sendMessage: (jid, text) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      // An IPC-delivered message is a visible reply too
+      pendingVisibleReply.delete(jid);
       return channel.sendMessage(jid, text);
     },
     registeredGroups: () => registeredGroups,
@@ -1465,6 +1537,7 @@ async function main(): Promise<void> {
   });
   startSessionCleanup();
   startDeployWatcher();
+  startReplyWatchdog();
   startPullWatcher();
   queue.setProcessMessagesFn(processGroupMessages);
   await backfillUnregisteredChannels();
