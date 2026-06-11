@@ -34,11 +34,13 @@ Personal Claude assistant. See [README.md](README.md) for philosophy and setup. 
 
 ### 등록된 스케줄 태스크 (`scheduled_tasks` 테이블, 미니 PC DB)
 
-세 개 모두 `group_folder=discord_main`, `context_mode=group`, 타임존 Asia/Seoul:
+모두 `group_folder=discord_main`, 타임존 Asia/Seoul:
 
 - `migrated-monthly-ranking` — cron `0 9 1 * *` — 매월 1일 9시, 월간 랭킹을 공지 채널 `1231132864867860511`에 게시 (DB TOP10 공부시간 + TOP3 이모지)
 - `migrated-heartbeat-daily-log` — cron `0 9 * * *` — 매일 9시 업무일지 작성 (`daily-memories/YYYY/MM/YYYY-MM-DD.md`)
 - `migrated-heartbeat-memory-cleanup` — cron `0 3 * * *` — 매일 새벽 3시 memory-cleanup 실행
+- `task-diary-dormant-move` — cron `0 6 * * *` — 매일 6시 다이어리 휴면 이동
+- `task-1781072591793-q47f3v` — cron `0 6 * * *` — 매일 6시 직군 역할-닉네임 태그 동기화. `groups/global/nickname-sync.sh`(컨테이너 경로 `/workspace/global/nickname-sync.sh`)를 실행하며, 이 파일은 gitignore 대상이므로 새 머신 clone 시 `scripts/nickname-sync.sh`(git 추적본)를 `groups/global/`로 복사해야 한다. 원래 2026-06-10 등록 시도가 IPC 인가 버그로 무음 차단됐다가 2026-06-11 재등록됨
 
 ### 외부 의존 서비스 (NanoClaw 바깥)
 
