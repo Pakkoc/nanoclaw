@@ -88,6 +88,36 @@ let messageLoopRunning = false;
  */
 const deregisteredJids = new Set<string>();
 
+/**
+ * Trigger test for a single message. Reply messages get a
+ * "[Reply to <sender>] " prefix prepended at ingestion, which breaks the
+ * start-anchored trigger pattern — strip it before testing (observed
+ * 2026-06-12: reply-quoted "@부엉이" mentions were silently ignored, the
+ * third distinct silent-failure mode of this incident week). A direct reply
+ * to the assistant's own message addresses the assistant even without an
+ * explicit mention.
+ */
+function messageHasTrigger(m: NewMessage, triggerPattern: RegExp): boolean {
+  const content = m.content.trim();
+  if (triggerPattern.test(content)) return true;
+  if (m.reply_to_sender_name?.includes(ASSISTANT_NAME)) return true;
+  // Reply messages carry a "[Reply to <sender>] " prefix baked into content
+  // at ingestion, and sender names may themselves contain "] " (e.g.
+  // "[취준생] 하이호"), so the prefix cannot be reliably stripped. Fall back
+  // to an unanchored search, and treat a reply whose head names the
+  // assistant (replying to the bot, or calling it by name right away) as
+  // addressed to it.
+  if (content.startsWith('[Reply to ')) {
+    const unanchored = new RegExp(
+      triggerPattern.source.replace(/^\^/, ''),
+      triggerPattern.flags,
+    );
+    if (unanchored.test(content)) return true;
+    if (content.slice(0, 50).includes(ASSISTANT_NAME)) return true;
+  }
+  return false;
+}
+
 /** Folders whose channels have a hard daily response limit (enforced at host level). */
 const DIARY_FOLDER_PREFIX = 'diaries/';
 /** Maximum bot responses per day for diary channels. */
@@ -454,7 +484,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     const allowlistCfg = loadSenderAllowlist();
     const hasTrigger = missedMessages.some(
       (m) =>
-        triggerPattern.test(m.content.trim()) &&
+        messageHasTrigger(m, triggerPattern) &&
         (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
     );
     if (!hasTrigger) return true;
@@ -883,7 +913,7 @@ async function startMessageLoop(): Promise<void> {
             const allowlistCfg = loadSenderAllowlist();
             const hasTrigger = groupMessages.some(
               (m) =>
-                triggerPattern.test(m.content.trim()) &&
+                messageHasTrigger(m, triggerPattern) &&
                 (m.is_from_me ||
                   isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
             );
