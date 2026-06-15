@@ -226,7 +226,7 @@ const monthlyRankingPrompt = `매월 1일 오전 9시 — 월간 랭킹 공지
 
 1. 공부시간 TOP 10 — SQL의 날짜 리터럴은 위에서 계산한 실제 날짜로 치환:
    \`\`\`bash
-   bash /home/node/.claude/skills/db-query/db-query.sh "SELECT u.user_id, u.nickname, u.level, ROUND(SUM(v.duration_seconds)/3600.0, 1) AS hours FROM voice_sessions_clean v JOIN users_clean u ON u.user_id = v.user_id WHERE v.started_at >= ${Q}<전월1일>${Q} AND v.started_at < ${Q}<당월1일>${Q} GROUP BY u.user_id, u.nickname, u.level ORDER BY hours DESC LIMIT 10"
+   bash /home/node/.claude/skills/db-query/db-query.sh "SELECT u.user_id, u.nickname, u.level, ROUND(SUM(v.duration_seconds)/3600.0, 1) AS hours FROM voice_sessions_clean v JOIN users_clean u ON u.user_id = v.user_id WHERE v.started_at >= ${Q}<전월1일>${Q} AND v.started_at < ${Q}<당월1일>${Q} AND u.user_id NOT IN ('364764044948799491','276024344101257216','459757901251346452','1341276764827156555','1397824633805475905','845167421069590560','537616840898248705') GROUP BY u.user_id, u.nickname, u.level ORDER BY hours DESC LIMIT 10"
    \`\`\`
 2. 이모지 반응 TOP 3:
    \`\`\`bash
