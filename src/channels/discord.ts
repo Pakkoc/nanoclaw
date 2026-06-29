@@ -33,6 +33,19 @@ export interface DiscordChannelOpts {
   defaultTrigger: () => string;
 }
 
+// Staff Discord IDs for ticket channel intervention check.
+// When any of these users has posted in a ticket channel, Claude stays silent
+// (host-level guard — not subject to LLM reasoning).
+const TICKET_STAFF_IDS = new Set([
+  '364764044948799491', // 성호
+  '459757901251346452', // 죨디
+  '276024344101257216', // 요나새
+  '1341276764827156555', // 호녈
+  '1397824633805475905', // 초코슈
+  '845167421069590560', // 운명교향곡
+  '537616840898248705', // 나린
+]);
+
 // Diary category IDs — messages in these categories are auto-registered
 // as per-channel groups using the discord_diary CLAUDE.md template.
 const DIARY_CATEGORY_IDS = new Set([
@@ -147,9 +160,10 @@ export class DiscordChannel implements Channel {
       // Discord mentions look like <@botUserId> — these won't match
       // TRIGGER_PATTERN (e.g., ^@Andy\b), so we prepend the trigger
       // when the bot is @mentioned.
+      let isBotMentioned = false;
       if (this.client?.user) {
         const botId = this.client.user.id;
-        const isBotMentioned =
+        isBotMentioned =
           message.mentions.users.has(botId) ||
           content.includes(`<@${botId}>`) ||
           content.includes(`<@!${botId}>`);
@@ -257,6 +271,53 @@ export class DiscordChannel implements Channel {
       // 표시. is_bot_message=1이면 getNewMessages/getMessagesSince에서 제외되어
       // 에이전트를 깨우지 않지만, 업무일지 크론의 raw SQL 쿼리에는 그대로 잡힘.
       const isSelfBot = message.author.id === this.client?.user?.id;
+
+      // ── Ticket channel: host-level staff intervention guard ──────────────
+      // If a staff member has already posted in this ticket channel, Claude
+      // must stay silent — no LLM reasoning involved.
+      // Exception: if the bot is directly @mentioned, always respond.
+      if (isTicketChannel && !isSelfBot && !isBotMentioned) {
+        const isFromStaff = TICKET_STAFF_IDS.has(message.author.id);
+        let staffHasReplied = false;
+
+        if (!isFromStaff) {
+          // Regular user message — check if any staff has posted before
+          try {
+            const recent = await (
+              message.channel as TextChannel
+            ).messages.fetch({ limit: 50, before: message.id });
+            staffHasReplied = recent.some((m) =>
+              TICKET_STAFF_IDS.has(m.author.id),
+            );
+          } catch (err) {
+            // Fail-open: if check fails, proceed normally
+            logger.warn(
+              { channelId, err },
+              'Ticket staff-check failed, proceeding normally',
+            );
+          }
+        }
+
+        if (isFromStaff || staffHasReplied) {
+          // Store the message for history but suppress agent wake-up
+          this.opts.onMessage(chatJid, {
+            id: msgId,
+            chat_jid: chatJid,
+            sender,
+            sender_name: senderName,
+            content,
+            timestamp,
+            is_from_me: false,
+            is_bot_message: true,
+          });
+          logger.info(
+            { channelId, senderName, isFromStaff, staffHasReplied },
+            'Ticket: staff already intervened — agent suppressed',
+          );
+          return;
+        }
+      }
+      // ────────────────────────────────────────────────────────────────────
 
       // Deliver message — startMessageLoop() will pick it up
       this.opts.onMessage(chatJid, {
