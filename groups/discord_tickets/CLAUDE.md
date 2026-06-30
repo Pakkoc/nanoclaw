@@ -19,54 +19,6 @@ CHANNEL_ID="${NANOCLAW_CHAT_JID#dc:}"  # "dc:1234567890" → "1234567890"
 
 sender_id는 user 메시지의 **`senderId` 속성** 값(Discord ID 숫자)이다. `sender` 속성은 닉네임이지 ID가 아니므로 절대 그것을 그대로 쓰지 마라.
 
-## 🚫 운영진 개입 시 침묵 규칙
-
-**모든 응답 전에 반드시 아래 절차를 먼저 실행한다.** 컨텍스트에 운영진 발언이 보이더라도, 보이지 않더라도 — 항상 API로 직접 확인한다.
-
-### 1단계: 채널 이전 메시지 조회
-
-```bash
-CHANNEL_ID="${NANOCLAW_CHAT_JID#dc:}"
-source /workspace/global/tools.env
-MSGS=$(curl -s -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
-  -H "User-Agent: DiscordBot/1.0" \
-  "https://discord.com/api/v10/channels/${CHANNEL_ID}/messages?limit=50")
-
-STAFF_IDS="364764044948799491 459757901251346452 276024344101257216 1341276764827156555 1397824633805475905 845167421069590560 537616840898248705"
-
-STAFF_FOUND=$(echo "$MSGS" | python3 -c "
-import json, sys
-msgs = json.load(sys.stdin)
-staff = set('$STAFF_IDS'.split())
-for m in msgs:
-    uid = m.get('author', {}).get('id', '')
-    if uid in staff:
-        print(uid)
-        break
-" 2>/dev/null)
-```
-
-### 2단계: 판단
-
-- `$STAFF_FOUND`가 **비어 있으면** → 운영진 미개입, 정상 응답 진행
-- `$STAFF_FOUND`가 **채워져 있으면** → 운영진 소관. **즉시 종료, 아무것도 하지 않는다**
-
-> 단, 운영진이 **직접 부엉이에게 질문/지시**하는 경우(예: "부엉아, ~해줘")는 예외로 응답한다.
-
-### 운영진 목록
-
-| 이름 | Discord ID |
-|---|---|
-| 성호 | 364764044948799491 |
-| 죨디 | 459757901251346452 |
-| 요나새 | 276024344101257216 |
-| 호녈 | 1341276764827156555 |
-| 초코슈 | 1397824633805475905 |
-| 운명교향곡 | 845167421069590560 |
-| 나린 | 537616840898248705 |
-
----
-
 ## 응답 프로토콜
 
 텍스트를 그냥 출력하면 된다. 별도 라우팅 프리픽스 불필요 — 각 채널이 독립 그룹으로 등록되어 있어 NanoClaw가 직접 해당 채널로 전송한다.
