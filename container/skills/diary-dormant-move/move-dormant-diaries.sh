@@ -39,6 +39,7 @@ DORMANT_CATEGORIES = [
     "1354671983664828549",  # ~휴면 다이어리 2~
     "1422467951109345300",  # ~휴면 다이어리 3~
     "1476394387784077405",  # ~휴면 다이어리 4~
+    "1522048332967575712",  # ~휴면 다이어리 5~
 ]
 
 # 6개월 기준 (180일)
@@ -89,6 +90,19 @@ def api_post(path, data):
 
 def snowflake_to_ms(snowflake_id):
     return (int(snowflake_id) >> 22) + 1420070400000
+
+
+def get_owner_from_first_message(channel_id):
+    """첫 메시지의 멘션된 유저 ID를 소유자로 반환. 없으면 None."""
+    try:
+        msgs = api_get(f"/channels/{channel_id}/messages?limit=1&after=0")
+        if isinstance(msgs, list) and msgs:
+            mentions = msgs[0].get("mentions", [])
+            if mentions:
+                return mentions[0].get("id")
+    except Exception:
+        pass
+    return None
 
 
 # ─── 1. 서버 전체 채널 조회 ─────────────────────────────────────────────
@@ -164,6 +178,13 @@ for c in all_channels:
         if p.get("type") == 1:
             owner_id = p["id"]
             break
+
+    # type=1 없으면 첫 메시지 멘션으로 소유자 파악
+    # (Discord는 서버 탈퇴 시 type=1 오버라이드를 자동 삭제함)
+    if not owner_id:
+        owner_id = get_owner_from_first_message(channel_id)
+        if owner_id:
+            time.sleep(0.2)  # API rate limit 방지
 
     # 조건 2: 탈퇴 멤버
     if owner_id and owner_id not in members:
