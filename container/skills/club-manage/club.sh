@@ -19,6 +19,7 @@ DORM_ROLES=(
 )
 
 # 권한 상수
+VOICE_EVERYONE_ALLOW="1024"              # VIEW
 VOICE_EVERYONE_DENY="377960278528"       # SEND+CONNECT+SPEAK+CREATE_THREADS+SEND_IN_THREADS
 VOICE_DORM_ALLOW="1024"                  # VIEW
 VOICE_DORM_DENY="1048576"               # CONNECT
@@ -84,9 +85,9 @@ set_permissions() {
 
     case "$type" in
         voice)
-            # @everyone: CONNECT 등 DENY
+            # @everyone: VIEW ALLOW, CONNECT 등 DENY
             api_put "/channels/$ch_id/permissions/1213133289498615818" \
-                "{\"type\":0,\"allow\":\"0\",\"deny\":\"$VOICE_EVERYONE_DENY\"}" > /dev/null
+                "{\"type\":0,\"allow\":\"$VOICE_EVERYONE_ALLOW\",\"deny\":\"$VOICE_EVERYONE_DENY\"}" > /dev/null
 
             # 기숙사 역할: VIEW ALLOW + CONNECT DENY
             for dorm in "${DORM_ROLES[@]}"; do
