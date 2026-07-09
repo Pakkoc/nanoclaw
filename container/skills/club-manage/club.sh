@@ -19,7 +19,7 @@ DORM_ROLES=(
 )
 
 # 권한 상수
-VOICE_EVERYONE_ALLOW="1024"              # VIEW
+VOICE_EVERYONE_ALLOW="0"                # VIEW 없음 (기숙사 역할에만 VIEW ALLOW — JSC 방식)
 VOICE_EVERYONE_DENY="377960278528"       # SEND+CONNECT+SPEAK+CREATE_THREADS+SEND_IN_THREADS
 VOICE_DORM_ALLOW="1024"                  # VIEW
 VOICE_DORM_DENY="1048576"               # CONNECT
@@ -60,9 +60,16 @@ api_put() {
          -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
          -H "User-Agent: DiscordBot/1.0" \
          -H "Content-Type: application/json" \
-         -d "${3:-{\}}" \
+         ${2:+-d "$2"} \
          "https://discord.com/api/v10$1")
     echo "$status"
+}
+
+api_delete() {
+    curl -s -o /dev/null -w "%{http_code}" -X DELETE \
+         -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
+         -H "User-Agent: DiscordBot/1.0" \
+         "https://discord.com/api/v10$1"
 }
 
 api_patch() {
@@ -116,6 +123,11 @@ set_permissions() {
             # 동아리 역할: 모두 ALLOW
             api_put "/channels/$ch_id/permissions/$role_id" \
                 "{\"type\":0,\"allow\":\"$TEXT_ROLE_ALLOW\",\"deny\":\"0\"}" > /dev/null
+
+            # 입학생·노란부엉이 VIEW DENY 삭제 (카테고리에서 상속됨 — 모두가 볼 수 있어야 함)
+            api_delete "/channels/$ch_id/permissions/1236275792657514528" > /dev/null
+            sleep 0.2
+            api_delete "/channels/$ch_id/permissions/1358244936129970247" > /dev/null
             ;;
 
         forum)
@@ -133,6 +145,11 @@ set_permissions() {
             # 동아리 역할: 모두 ALLOW
             api_put "/channels/$ch_id/permissions/$role_id" \
                 "{\"type\":0,\"allow\":\"$FORUM_ROLE_ALLOW\",\"deny\":\"0\"}" > /dev/null
+
+            # 입학생·노란부엉이 VIEW DENY 삭제 (카테고리에서 상속됨 — 모두가 볼 수 있어야 함)
+            api_delete "/channels/$ch_id/permissions/1236275792657514528" > /dev/null
+            sleep 0.2
+            api_delete "/channels/$ch_id/permissions/1358244936129970247" > /dev/null
             ;;
     esac
 
