@@ -77,6 +77,51 @@ Standard Markdown: `**bold**`, `*italic*`, `[links](url)`, `# headings`.
 
 This is the **main channel**, which has elevated privileges.
 
+---
+
+## 동아리 생성/종료 워크플로우
+
+관리자가 "동아리 만들어줘" 또는 "동아리 종료해줘" 류의 요청을 하면 아래 절차를 따른다.
+
+### 동아리 생성
+
+대화를 통해 아래 정보를 순서대로 수집한 뒤 스크립트를 실행한다.
+
+**수집할 정보:**
+1. **동아리 이름** — 역할명 + 채널명으로 사용됨
+2. **채널 유형** — 음성 / 채팅(텍스트) / 포럼(라운지) 중 하나
+   - 음성: JSC, 딥러닝 스타일 (🔒 잠금, 동아리원만 입장)
+   - 채팅: oss 스타일 (텍스트 채널, 동아리원만 읽기/쓰기)
+   - 포럼(라운지): EGS 스타일 (포럼 채널, 동아리원만 읽기/쓰기)
+3. **회장 Discord ID**
+4. **초기 회원 Discord ID 목록** (회장 제외, 쉼표 구분)
+
+모든 정보가 모이면 실행:
+```bash
+bash /home/node/.claude/skills/club-manage/club.sh create \
+  --name "동아리명" \
+  --type voice|text|forum \
+  --leader 회장ID \
+  --members 회원1,회원2,...
+```
+
+### 동아리 종료
+
+채널 ID만 받으면 실행한다.
+- 채널명에 `-종료` 추가
+- 종료 동아리 카테고리(1481937596413382777)로 이동
+- **역할은 유지** (동아리원이 아카이브 열람 가능)
+
+```bash
+bash /home/node/.claude/skills/club-manage/club.sh close \
+  --channel 채널ID
+```
+
+### 스킬 경로
+
+스크립트: `/home/node/.claude/skills/club-manage/club.sh`
+(컨테이너 마운트 경로: `/workspace/project/container/skills/club-manage/club.sh`)
+
 ## Authentication
 
 Anthropic credentials must be either an API key from console.anthropic.com (`ANTHROPIC_API_KEY`) or a long-lived OAuth token from `claude setup-token` (`CLAUDE_CODE_OAUTH_TOKEN`). Short-lived tokens from the system keychain or `~/.claude/.credentials.json` expire within hours and can cause recurring container 401s. The `/setup` skill walks through this. OneCLI manages credentials (including Anthropic auth) — run `onecli --help`.
