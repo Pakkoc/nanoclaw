@@ -98,7 +98,7 @@ export class DiscordChannel implements Channel {
       const timestamp = message.createdAt.toISOString();
 
       // Ticket channel detection: ticket-* channels under the configured
-      // ticket category are auto-registered as per-channel groups.
+      // ticket category are routed to the dc:tickets catchall JID.
       const ticketChannel =
         this.ticketCategoryId && message.guild
           ? (message.channel as TextChannel)
@@ -107,6 +107,14 @@ export class DiscordChannel implements Channel {
         ticketChannel !== null &&
         ticketChannel.parentId === this.ticketCategoryId &&
         (ticketChannel.name?.startsWith('ticket-') ?? false);
+
+      // Tickets use a single virtual JID (dc:tickets) with per-channel prefix
+      // embedded in the content, so the admin agent can query all tickets in one place.
+      if (isTicketChannel) {
+        chatJid = 'dc:tickets';
+        const prefix = `[ticket-channel:${channelId} #${ticketChannel!.name}]`;
+        content = content ? `${prefix} ${content}` : prefix;
+      }
 
       // Thread detection: public/private threads inside diary channels.
       const isThread =
@@ -219,40 +227,20 @@ export class DiscordChannel implements Channel {
         }
       }
 
-      // Store chat metadata for this channel so it appears in the chats table.
+      // Store chat metadata so it appears in the chats table.
       // Must happen before storeMessage (FK constraint: chat_jid in chats).
+      // Tickets use chatJid (dc:tickets); all others use realJid.
       const isGroup = message.guild !== null;
       this.opts.onChatMetadata(
-        realJid,
+        chatJid,
         timestamp,
-        chatName,
+        isTicketChannel ? '마법사관학교 티켓 카테고리' : chatName,
         'discord',
         isGroup,
       );
 
-      // Auto-register per-channel groups. Tickets stay inline (single category,
-      // simple shape). Diary registration goes through ensureGroupRegistered
-      // so the same idempotent path covers onMessageCreate, host backfill on
-      // startup, and the message-loop backstop — no path can silently skip it.
-      const allGroups = this.opts.registeredGroups();
-      if (!allGroups[realJid] && isTicketChannel) {
-        this.opts.registerGroup(
-          realJid,
-          {
-            name: `티켓 #${ticketChannel!.name}`,
-            folder: `discord_tickets_ch${channelId}`,
-            trigger: this.opts.defaultTrigger(),
-            added_at: new Date().toISOString(),
-            requiresTrigger: false,
-          },
-          'discord_tickets',
-        );
-        logger.info(
-          { channelId, channelName: ticketChannel!.name },
-          'Auto-registered ticket channel group',
-        );
-      }
       // Diary: idempotent. No-op if already registered.
+      // Tickets use the pre-registered dc:tickets group — no per-channel registration.
       if (!isTicketChannel) {
         await this.ensureGroupRegistered(realJid);
       }
