@@ -15,6 +15,45 @@ Personal Claude assistant. See [README.md](README.md) for philosophy and setup. 
 - **컨테이너 런타임**: Docker 29.x (user가 docker 그룹 멤버, sudo 불필요)
 - **크리덴셜**: OneCLI gateway (`http://172.17.0.1:10254`) + `groups/global/tools.env` (DB/Discord 토큰, git 제외)
 
+### 크리덴셜 갱신 (Anthropic 구독 토큰) — ⏰ 2027-07 만료
+
+Anthropic 인증은 **API 키가 아니라 Claude Max 구독 OAuth 토큰**(`sk-ant-oat01-`, 108자)이다. OneCLI vault에 단 하나 등록되어 있다:
+
+| 항목 | 값 |
+|---|---|
+| 시크릿 ID | `43966231-0294-4fd2-9ab9-2df2f1b0fe27` |
+| name / type / hostPattern | `Anthropic` / `anthropic` / `api.anthropic.com` |
+
+**Default Agent와 기숙사 다이어리 에이전트(selective 모드) 전부가 이 단일 ID를 참조한다.** 따라서 갱신은 반드시 값만 in-place 교체할 것:
+
+```bash
+# 1) 새 토큰 발급 — 브라우저 OAuth. 토큰은 저장되지 않고 터미널에만 출력되므로 그 자리에서 복사
+claude setup-token
+
+# 2) 값만 교체 (ID 유지 → 모든 에이전트 연결 보존)
+onecli secrets update --id 43966231-0294-4fd2-9ab9-2df2f1b0fe27 --value 'sk-ant-oat01-...'
+```
+
+⚠️ **`secrets create`로 새로 만들지 말 것.** 새 ID가 생기면 selective 모드 에이전트 전부에 `agents set-secrets`로 재할당해야 하고, 누락되면 해당 다이어리 채널만 조용히 인증 실패한다.
+
+⚠️ **`~/.claude/.credentials.json`의 `accessToken`을 vault에 넣지 말 것.** 그건 `/login`이 만드는 **8시간짜리 세션 토큰**이라 당일 저녁에 봇이 통째로 죽는다. `setup-token`이 발급하는 1년짜리 장기 토큰만 사용한다. 자동 갱신은 없다.
+
+**재시작 불필요** — 게이트웨이가 HTTPS 프록시(10255) 단에서 주입하므로 실행 중인 컨테이너도 즉시 새 토큰을 쓴다. 컨테이너에 들어가는 `CLAUDE_CODE_OAUTH_TOKEN`은 `placeholder` 문자열이고 실제 값은 프록시가 바꿔치기한다.
+
+교체 후 검증 (HTTP 200이면 정상):
+
+```bash
+export SP=$(mktemp -d)
+KEY=$(onecli auth api-key | python3 -c "import json,sys;print(json.load(sys.stdin)['apiKey'])")
+CFG=$(curl -s "http://172.17.0.1:10254/api/container-config" -H "Authorization: Bearer $KEY")
+echo "$CFG" | python3 -c "import json,sys,os;open(os.environ['SP']+'/ca.pem','w').write(json.load(sys.stdin)['caCertificate'])"
+PROXY=$(echo "$CFG" | python3 -c "import json,sys;print(json.load(sys.stdin)['env']['HTTPS_PROXY'].replace('host.docker.internal','172.17.0.1'))")
+curl -s -o /dev/null -w "HTTP %{http_code}\n" --proxy "$PROXY" --cacert "$SP/ca.pem" \
+  https://api.anthropic.com/v1/messages \
+  -H "Authorization: Bearer placeholder" -H "anthropic-version: 2023-06-01" -H "content-type: application/json" \
+  -d '{"model":"claude-haiku-4-5-20251001","max_tokens":16,"messages":[{"role":"user","content":"ping"}]}'
+```
+
 ### 봇 정체성 & 등록된 그룹
 
 - **이름**: 부엉이 (노란 부엉이 AI, 마법사관학교✦STUDY Discord 서버)
