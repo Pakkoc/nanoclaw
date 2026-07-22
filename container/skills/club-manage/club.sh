@@ -28,11 +28,13 @@ VOICE_ROLE_ALLOW="3149312"              # VIEW+STREAM+SEND+CONNECT+SPEAK
 TEXT_EVERYONE_ALLOW="1024"              # VIEW
 TEXT_EVERYONE_DENY="3213312"            # SEND+READ_HIST+CONNECT+SPEAK
 TEXT_DORM_ALLOW="1024"                  # VIEW
+TEXT_DORM_DENY="3213312"               # SEND+READ_HIST+CONNECT+SPEAK (서버 레벨 READ_HIST 차단)
 TEXT_ROLE_ALLOW="3214848"              # VIEW+STREAM+SEND+CONNECT+SPEAK+READ_HIST
 
 FORUM_EVERYONE_ALLOW="1024"             # VIEW
 FORUM_EVERYONE_DENY="309240858624"      # SEND+READ_HIST+CONNECT+SPEAK+CREATE_THREADS+SEND_IN_THREADS
 FORUM_DORM_ALLOW="1024"                 # VIEW
+FORUM_DORM_DENY="309240858624"         # SEND+READ_HIST+CONNECT+SPEAK+CREATE_THREADS+SEND_IN_THREADS (서버 레벨 READ_HIST 차단)
 FORUM_ROLE_ALLOW="309237713920"         # VIEW+SEND+READ_HIST+CREATE_THREADS+SEND_IN_THREADS
 
 # tools.env에서 Discord 봇 토큰 로드
@@ -113,10 +115,10 @@ set_permissions() {
             api_put "/channels/$ch_id/permissions/1213133289498615818" \
                 "{\"type\":0,\"allow\":\"$TEXT_EVERYONE_ALLOW\",\"deny\":\"$TEXT_EVERYONE_DENY\"}" > /dev/null
 
-            # 기숙사 역할: VIEW ALLOW
+            # 기숙사 역할: VIEW ALLOW, READ_HIST+SEND DENY
             for dorm in "${DORM_ROLES[@]}"; do
                 api_put "/channels/$ch_id/permissions/$dorm" \
-                    "{\"type\":0,\"allow\":\"$TEXT_DORM_ALLOW\",\"deny\":\"0\"}" > /dev/null
+                    "{\"type\":0,\"allow\":\"$TEXT_DORM_ALLOW\",\"deny\":\"$TEXT_DORM_DENY\"}" > /dev/null
                 sleep 0.2
             done
 
@@ -135,10 +137,10 @@ set_permissions() {
             api_put "/channels/$ch_id/permissions/1213133289498615818" \
                 "{\"type\":0,\"allow\":\"$FORUM_EVERYONE_ALLOW\",\"deny\":\"$FORUM_EVERYONE_DENY\"}" > /dev/null
 
-            # 기숙사 역할: VIEW ALLOW
+            # 기숙사 역할: VIEW ALLOW, READ_HIST+SEND DENY
             for dorm in "${DORM_ROLES[@]}"; do
                 api_put "/channels/$ch_id/permissions/$dorm" \
-                    "{\"type\":0,\"allow\":\"$FORUM_DORM_ALLOW\",\"deny\":\"0\"}" > /dev/null
+                    "{\"type\":0,\"allow\":\"$FORUM_DORM_ALLOW\",\"deny\":\"$FORUM_DORM_DENY\"}" > /dev/null
                 sleep 0.2
             done
 
