@@ -388,6 +388,26 @@ If a user wants tasks running more than ~2x daily and a script can't reduce agen
 
 기숙사 변경은 **1회만** 허용. 관리자가 특정 유저의 기숙사 변경을 요청하거나 변경 이력을 물으면, **반드시 먼저** 아래 채널의 메시지를 조회해서 해당 유저의 변경 이력을 확인해라.
 
+### 기숙사/다이어리 카테고리 이동 시 역할 확인 규칙
+
+채널을 어느 기숙사 카테고리로 이동할지 결정할 때 **권한 오버라이트(permission_overwrites)만 보고 역할을 추정하면 안 된다.** 반드시 아래 순서로 확인해라:
+
+1. 채널 소유자의 **역할 ID** 파악 (채널 permission_overwrites 또는 Guild Member 역할 목록에서)
+2. **Guild Roles API로 역할 이름 직접 조회**:
+   ```bash
+   source /workspace/global/tools.env
+   curl -s -H "Authorization: Bot $DISCORD_BOT_TOKEN" -H "User-Agent: DiscordBot/1.0" \
+     "https://discord.com/api/v10/guilds/1213133289498615818/roles" \
+     | python3 -c "import json,sys; roles=json.load(sys.stdin); [print(r['id'], r['name']) for r in roles if r['id'] in ['<역할ID>']]"
+   ```
+3. 역할 이름으로 기숙사 카테고리 매핑:
+   - 소용돌이 → 카테고리 `1236979261529657426`
+   - 노블레빗 → 카테고리 `1236979345529114664`
+   - 볼리베어 → 카테고리 `1236979439879848028`
+   - 펭도리야 → 카테고리 `1386697214910529687`
+
+**교훈 (2026-08-07)**: "하루잠" 채널을 permission_overwrites만 보고 볼리베어로 잘못 이동. 실제 역할은 노블레빗 🐇이었음 → 노블레빗으로 재이동 수정.
+
 **기숙사 변경 문의 채널**: `1514124242952781854` (🏘️ 기숙사 변경 문의)
 
 ```bash
