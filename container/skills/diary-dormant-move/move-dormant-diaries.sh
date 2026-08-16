@@ -167,6 +167,14 @@ def count_channel_messages(channel_id, limit=10):
     return 0
 
 
+def remove_user_overwrites(channel_id, overwrites):
+    """채널에서 개인(type=1) 권한 오버라이드 제거."""
+    for ow in overwrites:
+        if ow.get("type") == 1:
+            api_delete(f"/channels/{channel_id}/permissions/{ow['id']}")
+            time.sleep(0.2)
+
+
 # ─── 1. 서버 전체 채널 조회 ─────────────────────────────────────────────
 all_channels = api_get(f"/guilds/{GUILD_ID}/channels")
 if not isinstance(all_channels, list):
@@ -288,6 +296,7 @@ for c in all_channels:
             "owner_id": owner_id,
             "dorm": DORM_CATEGORIES.get(c.get("parent_id"), "?"),
             "total_msg_count": total_msg_count,
+            "permission_overwrites": c.get("permission_overwrites", []),
         })
 
 if not to_process:
@@ -330,6 +339,8 @@ for ch in to_process:
 
     result = api_patch(f"/channels/{ch['id']}", {"parent_id": target})
     if result.get("id"):
+        # 개인(type=1) 권한 오버라이드 제거 — 소유자도 열람 불가
+        remove_user_overwrites(ch["id"], ch["permission_overwrites"])
         moved.append({
             "id": ch["id"],
             "name": ch["name"],
