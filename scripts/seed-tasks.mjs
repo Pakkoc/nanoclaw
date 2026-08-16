@@ -172,7 +172,7 @@ SQL
 
 형식 예시:
 • ✅ 03:00 memory-cleanup — 삭제 0개
-• ✅ 06:00 diary-dormant-move — 꼬미 1개 이동
+• ✅ 06:00 diary-dormant-move — 이동 1개 / 삭제 0개
 • ✅ 06:00 닉네임 동기화 — 변경 1명
 • ✅ 09:00 daily-log — 본 업무일지 작성
 

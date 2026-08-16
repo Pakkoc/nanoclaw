@@ -1,5 +1,5 @@
 #!/bin/bash
-# move-dormant-diaries.sh — 휴면 다이어리 이동 스크립트
+# move-dormant-diaries.sh — 휴면 다이어리 이동/삭제 스크립트
 # NanoClaw 스케줄 태스크의 script로 실행
 # 출력: {"wakeAgent": true, "data": {...}} 또는 {"wakeAgent": false}
 
@@ -47,6 +47,9 @@ SIX_MONTHS_MS = 180 * 24 * 60 * 60 * 1000
 now_ms = int(time.time() * 1000)
 cutoff_ms = now_ms - SIX_MONTHS_MS
 
+# 메시지 수 기준 (미만이면 이동 대신 삭제)
+DELETE_THRESHOLD = 10
+
 
 def api_get(path):
     req = Request(f"{API_BASE}{path}", headers={
@@ -88,6 +91,18 @@ def api_post(path, data):
         return json.loads(e.read())
 
 
+def api_delete(path):
+    req = Request(f"{API_BASE}{path}", method="DELETE", headers={
+        "Authorization": f"Bot {TOKEN}",
+        "User-Agent": "DiscordBot (https://nanoclaw.ai, 1.0)"
+    })
+    try:
+        with urlopen(req) as r:
+            return r.status
+    except HTTPError as e:
+        return e.code
+
+
 def snowflake_to_ms(snowflake_id):
     return (int(snowflake_id) >> 22) + 1420070400000
 
@@ -103,6 +118,53 @@ def get_owner_from_first_message(channel_id):
     except Exception:
         pass
     return None
+
+
+def get_thread_stats(channel_id):
+    """
+    채널의 모든 스레드에서:
+    - 가장 최근 메시지 시간(ms) — 6개월 비활성 판단에 사용
+    - 스레드 메시지 총 수 — 삭제 기준에 사용 (message_count 필드, 최대 50까지 집계)
+    반환: (latest_ms, total_thread_msg_count)
+    """
+    latest_ms = 0
+    total_count = 0
+
+    threads = []
+
+    # 활성 스레드
+    active = api_get(f"/channels/{channel_id}/threads/active")
+    if isinstance(active, dict):
+        threads.extend(active.get("threads", []))
+    time.sleep(0.2)
+
+    # 아카이브된 공개 스레드
+    archived = api_get(f"/channels/{channel_id}/threads/archived/public?limit=100")
+    if isinstance(archived, dict):
+        threads.extend(archived.get("threads", []))
+    time.sleep(0.2)
+
+    for t in threads:
+        # 스레드 최신 활동 시간
+        t_last = t.get("last_message_id")
+        if t_last:
+            t_ms = snowflake_to_ms(t_last)
+            if t_ms > latest_ms:
+                latest_ms = t_ms
+
+        # 스레드 메시지 수 (Discord가 최대 50까지만 집계하지만 10 기준엔 충분)
+        mc = t.get("message_count") or 0
+        total_count += mc
+
+    return latest_ms, total_count
+
+
+def count_channel_messages(channel_id, limit=10):
+    """채널 메인 타임라인에서 최대 limit개 메시지를 조회해 실제 개수 반환."""
+    msgs = api_get(f"/channels/{channel_id}/messages?limit={limit}")
+    if isinstance(msgs, list):
+        return len(msgs)
+    return 0
 
 
 # ─── 1. 서버 전체 채널 조회 ─────────────────────────────────────────────
@@ -161,8 +223,9 @@ def create_new_dormant_category():
     return None
 
 
-# ─── 4. 이동 대상 수집 ──────────────────────────────────────────────────
-to_move = []
+# ─── 4. 이동/삭제 대상 수집 ─────────────────────────────────────────────
+to_process = []
+
 for c in all_channels:
     if c.get("type") != 0:  # 텍스트 채널만
         continue
@@ -172,6 +235,7 @@ for c in all_channels:
     channel_id = c["id"]
     reason = None
     owner_id = None
+    thread_stats = None  # (latest_ms, thread_msg_count) — 필요할 때만 조회
 
     # type=1(사용자) 오버라이드 찾기
     for p in c.get("permission_overwrites", []):
@@ -190,35 +254,73 @@ for c in all_channels:
     if owner_id and owner_id not in members:
         reason = f"탈퇴 멤버 (user_id={owner_id})"
 
-    # 조건 1: 6개월 비활성 (탈퇴 멤버가 아닌 채널만)
+    # 조건 1: 6개월 비활성 (스레드 포함)
     if reason is None:
         last_msg_id = c.get("last_message_id")
-        if last_msg_id:
-            if snowflake_to_ms(last_msg_id) < cutoff_ms:
+        channel_latest_ms = snowflake_to_ms(last_msg_id) if last_msg_id else snowflake_to_ms(channel_id)
+
+        if channel_latest_ms < cutoff_ms:
+            # 채널 메인이 오래됐으면 스레드도 확인
+            thread_stats = get_thread_stats(channel_id)
+            thread_latest_ms = thread_stats[0]
+            true_latest_ms = max(channel_latest_ms, thread_latest_ms)
+
+            if true_latest_ms < cutoff_ms:
                 reason = "6개월 비활성"
-        else:
-            # 한 번도 메시지 없음 → 채널 생성일 기준
-            if snowflake_to_ms(channel_id) < cutoff_ms:
-                reason = "메시지 없음 (6개월 이상)"
 
     if reason:
-        to_move.append({
+        # 스레드 통계 아직 없으면 지금 조회 (탈퇴 멤버 경로)
+        if thread_stats is None:
+            thread_stats = get_thread_stats(channel_id)
+            time.sleep(0.3)
+
+        thread_latest_ms, thread_msg_count = thread_stats
+
+        # 총 메시지 수 계산 (채널 메인 + 스레드)
+        ch_msg_count = count_channel_messages(channel_id, DELETE_THRESHOLD)
+        total_msg_count = ch_msg_count + thread_msg_count
+        time.sleep(0.2)
+
+        to_process.append({
             "id": channel_id,
             "name": c.get("name", ""),
             "reason": reason,
             "owner_id": owner_id,
             "dorm": DORM_CATEGORIES.get(c.get("parent_id"), "?"),
+            "total_msg_count": total_msg_count,
         })
 
-if not to_move:
+if not to_process:
     print(json.dumps({"wakeAgent": False}))
     sys.exit(0)
 
-# ─── 5. 이동 실행 ───────────────────────────────────────────────────────
+# ─── 5. 이동 또는 삭제 실행 ─────────────────────────────────────────────
 moved = []
+deleted = []
 errors = []
 
-for ch in to_move:
+for ch in to_process:
+    # 메시지 10개 미만 → 삭제
+    if ch["total_msg_count"] < DELETE_THRESHOLD:
+        status = api_delete(f"/channels/{ch['id']}")
+        if status in (200, 204):
+            deleted.append({
+                "id": ch["id"],
+                "name": ch["name"],
+                "reason": ch["reason"],
+                "from_dorm": ch["dorm"],
+                "msg_count": ch["total_msg_count"],
+            })
+        else:
+            errors.append({
+                "id": ch["id"],
+                "name": ch["name"],
+                "error": f"삭제 실패 (HTTP {status})",
+            })
+        time.sleep(0.3)
+        continue
+
+    # 메시지 10개 이상 → 휴면 카테고리로 이동
     target = get_dormant_target()
     if target is None:
         target = create_new_dormant_category()
@@ -247,6 +349,7 @@ print(json.dumps({
     "wakeAgent": True,
     "data": {
         "moved": moved,
+        "deleted": deleted,
         "errors": errors,
         "new_categories": created_categories
     }
