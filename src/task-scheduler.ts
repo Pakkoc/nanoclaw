@@ -196,6 +196,7 @@ async function runTask(
         if (streamedOutput.status === 'success') {
           deps.queue.notifyIdle(task.chat_jid);
           scheduleClose(); // Close promptly even when result is null (e.g. IPC-only tasks)
+          error = null; // Clear any earlier streaming error — task completed successfully
         }
         if (streamedOutput.status === 'error') {
           error = streamedOutput.error || 'Unknown error';
@@ -245,6 +246,7 @@ async function runTask(
           if (streamedOutput.status === 'success') {
             deps.queue.notifyIdle(task.chat_jid);
             scheduleClose();
+            error = null; // Clear any earlier streaming error — task completed successfully
           }
           if (streamedOutput.status === 'error') {
             error = streamedOutput.error || 'Unknown error';
@@ -255,6 +257,7 @@ async function runTask(
       if (retryOutput.status === 'error') {
         error = retryOutput.error || 'Unknown error';
       } else {
+        error = null; // Retry succeeded — clear original stale session error
         if (retryOutput.newSessionId)
           setSession(task.group_folder, retryOutput.newSessionId);
         if (retryOutput.result) result = retryOutput.result;
