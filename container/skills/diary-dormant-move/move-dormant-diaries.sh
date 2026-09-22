@@ -16,6 +16,20 @@ if [ -z "${DISCORD_BOT_TOKEN:-}" ]; then
   exit 1
 fi
 
+# ─── 인자 파싱 (선택적) ─────────────────────────────────────────────────
+# --months N        : 비활성 기준 개월 수 (기본 6)
+# --category CAT_ID : 특정 기숙사 카테고리만 처리 (기본 전체)
+# 환경변수로도 전달 가능: DORMANT_MONTHS=5 DORMANT_TARGET_CAT=xxx bash script.sh
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --months)   DORMANT_MONTHS="$2";     shift 2 ;;
+    --category) DORMANT_TARGET_CAT="$2"; shift 2 ;;
+    *)          shift ;;
+  esac
+done
+export DORMANT_MONTHS="${DORMANT_MONTHS:-6}"
+export DORMANT_TARGET_CAT="${DORMANT_TARGET_CAT:-}"
+
 python3 << PYEOF
 import os, json, time, sys
 from urllib.request import urlopen, Request
@@ -42,10 +56,14 @@ DORMANT_CATEGORIES = [
     "1522048332967575712",  # ~휴면 다이어리 5~
 ]
 
-# 6개월 기준 (180일)
-SIX_MONTHS_MS = 180 * 24 * 60 * 60 * 1000
+# 비활성 기준 개월 수 (기본 6개월, --months 인자 또는 DORMANT_MONTHS 환경변수로 오버라이드)
+MONTHS = int(os.environ.get("DORMANT_MONTHS", "6"))
+MONTHS_MS = MONTHS * 30 * 24 * 60 * 60 * 1000
 now_ms = int(time.time() * 1000)
-cutoff_ms = now_ms - SIX_MONTHS_MS
+cutoff_ms = now_ms - MONTHS_MS
+
+# 특정 카테고리만 처리 (비어있으면 전체 기숙사 처리)
+TARGET_CAT_FILTER = os.environ.get("DORMANT_TARGET_CAT", "")
 
 # 메시지 수 기준 (미만이면 이동 대신 삭제)
 DELETE_THRESHOLD = 10
@@ -239,6 +257,8 @@ for c in all_channels:
         continue
     if c.get("parent_id") not in DORM_CATEGORIES:
         continue
+    if TARGET_CAT_FILTER and c.get("parent_id") != TARGET_CAT_FILTER:
+        continue
 
     channel_id = c["id"]
     reason = None
@@ -274,7 +294,7 @@ for c in all_channels:
             true_latest_ms = max(channel_latest_ms, thread_latest_ms)
 
             if true_latest_ms < cutoff_ms:
-                reason = "6개월 비활성"
+                reason = f"{MONTHS}개월 비활성"
 
     if reason:
         # 스레드 통계 아직 없으면 지금 조회 (탈퇴 멤버 경로)
