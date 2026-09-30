@@ -2,7 +2,9 @@
 # create-diary.sh — 사용자의 기숙사에 다이어리 채널을 만들고 권한까지 설정
 #
 # 사용법:
-#   bash create-diary.sh <user_id> <ticket_channel_id>
+#   bash create-diary.sh <user_id> <ticket_channel_id>          # 신규 요청
+#   bash create-diary.sh --confirm-recover <ticket_channel_id>  # 이어쓰기 (네)
+#   bash create-diary.sh --confirm-new <ticket_channel_id>      # 새로 만들기 (아니요)
 
 # set -euo pipefail 의도적으로 제거 — 각 단계를 명시적으로 처리
 
@@ -32,13 +34,24 @@ DORMANT_CAT_IDS="1231241329384620134 1354671983664828549 1422467951109345300 147
 
 DORMANT_MOVE_SCRIPT="/home/node/.claude/skills/diary-dormant-move/move-dormant-diaries.sh"
 
-if [ $# -lt 2 ]; then
-  echo "Usage: $0 <user_id> <ticket_channel_id>" >&2
-  exit 1
+# ─── 인수 파싱 ────────────────────────────────────────────────────
+CONFIRM_MODE=""
+if [ "${1:-}" = "--confirm-recover" ] || [ "${1:-}" = "--confirm-new" ]; then
+  CONFIRM_MODE="$1"
+  TICKET_CHANNEL_ID="${2:-}"
+  USER_ID=""
+  if [ -z "$TICKET_CHANNEL_ID" ]; then
+    echo "Usage: $0 --confirm-recover|--confirm-new <ticket_channel_id>" >&2
+    exit 1
+  fi
+else
+  if [ $# -lt 2 ]; then
+    echo "Usage: $0 <user_id> <ticket_channel_id>" >&2
+    exit 1
+  fi
+  USER_ID="$1"
+  TICKET_CHANNEL_ID="$2"
 fi
-
-USER_ID="$1"
-TICKET_CHANNEL_ID="$2"
 
 TOOLS_ENV="/workspace/global/tools.env"
 if [ -z "${DISCORD_BOT_TOKEN:-}" ] && [ -f "$TOOLS_ENV" ]; then
@@ -92,6 +105,13 @@ api_patch() {
     -d "$2"
 }
 
+api_delete() {
+  curl -s -X DELETE \
+    "${API_BASE}$1" \
+    -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
+    -H "User-Agent: DiscordBot (https://nanoclaw.ai, 1.0)"
+}
+
 send_message() {
   local channel_id="$1"
   local content="$2"
@@ -117,15 +137,13 @@ send_message() {
 COMPLETE_MSG_SENT=0
 NEW_CHANNEL_ID=""
 
-# EXIT trap — 완료 메시지가 전송되지 않았으면 관리자 채널에 알림 (방안 B)
+# EXIT trap — 완료 메시지가 전송되지 않았으면 관리자 채널에 알림
 cleanup() {
   local exit_code=$?
   if [ "$COMPLETE_MSG_SENT" -eq 0 ]; then
     if [ -n "$NEW_CHANNEL_ID" ]; then
-      # 채널은 생성됐지만 완료 메시지 전송만 실패 — 부차적 문제, 경고 생략
       log "INFO: 완료 메시지 미전송이나 채널($NEW_CHANNEL_ID)은 정상 생성됨 — 관리자 알림 생략"
     else
-      # 채널 자체가 생성되지 않은 진짜 실패
       log "WARNING: 다이어리 생성 실패 감지 (exit_code=$exit_code) — 관리자 채널 알림"
       local alert="⚠️ 다이어리 생성 실패\n티켓 채널: <#${TICKET_CHANNEL_ID}>\n로그: $LOG_FILE"
       send_message "$ADMIN_CHANNEL" "$(printf '%b' "$alert")" || true
@@ -135,13 +153,213 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# ─── confirm 모드 처리 (early exit) ──────────────────────────────
+if [ -n "$CONFIRM_MODE" ]; then
+  STATE_FILE="/tmp/diary-confirm-${TICKET_CHANNEL_ID}.json"
+  log "=== diary-create ${CONFIRM_MODE}: ticket=$TICKET_CHANNEL_ID ==="
+
+  if [ ! -f "$STATE_FILE" ]; then
+    log "ERROR: 상태 파일 없음: $STATE_FILE"
+    send_message "$TICKET_CHANNEL_ID" "확인 대기 중인 요청이 없어요. 다시 다이어리 생성을 요청해주세요! 🦉" || true
+    COMPLETE_MSG_SENT=1
+    exit 1
+  fi
+
+  # 72시간(259200초) 만료 체크
+  CREATED_AT=$(python3 -c "import json; d=json.load(open('$STATE_FILE')); print(d.get('created_at', 0))" 2>/dev/null || echo "0")
+  NOW_TS=$(date +%s)
+  ELAPSED=$(( NOW_TS - CREATED_AT ))
+  if [ "$ELAPSED" -gt 259200 ]; then
+    log "상태 파일 만료 (${ELAPSED}초 경과) — 파일 삭제"
+    rm -f "$STATE_FILE"
+    send_message "$TICKET_CHANNEL_ID" "확인 대기 시간(72시간)이 지났어요 😅 다시 다이어리 생성을 요청해주세요! 🦉" || true
+    COMPLETE_MSG_SENT=1
+    exit 1
+  fi
+
+  # 상태 읽기
+  USER_ID=$(python3 -c "import json; d=json.load(open('$STATE_FILE')); print(d['user_id'])" 2>/dev/null || echo "")
+  RECOVERY_CHANNEL_ID=$(python3 -c "import json; d=json.load(open('$STATE_FILE')); print(d['existing_channel_id'])" 2>/dev/null || echo "")
+  CHANNEL_NAME=$(python3 -c "import json; d=json.load(open('$STATE_FILE')); print(d['channel_name'])" 2>/dev/null || echo "diary")
+  CATEGORY_ID=$(python3 -c "import json; d=json.load(open('$STATE_FILE')); print(d['category_id'])" 2>/dev/null || echo "")
+  DORM_LABEL=$(python3 -c "import json; d=json.load(open('$STATE_FILE')); print(d['dorm_label'])" 2>/dev/null || echo "")
+
+  if [ -z "$USER_ID" ] || [ -z "$RECOVERY_CHANNEL_ID" ] || [ -z "$CATEGORY_ID" ]; then
+    log "ERROR: 상태 파일 파싱 실패"
+    rm -f "$STATE_FILE"
+    send_message "$TICKET_CHANNEL_ID" "요청 처리 중 오류가 발생했어요. 다시 다이어리 생성을 요청해주세요! 🦉" || true
+    COMPLETE_MSG_SENT=1
+    exit 1
+  fi
+
+  # 상태 파일 삭제 (처리 시작 시점에 제거 — 중복 처리 방지)
+  rm -f "$STATE_FILE"
+  log "상태 로드 완료: user=$USER_ID existing=$RECOVERY_CHANNEL_ID category=$CATEGORY_ID ($DORM_LABEL)"
+
+  if [ "$CONFIRM_MODE" = "--confirm-recover" ]; then
+    # ─── 이어쓰기: 기존 채널 현재 기숙사로 복구 ──────────────────
+    log "[복구] $RECOVERY_CHANNEL_ID → 카테고리 $CATEGORY_ID ($DORM_LABEL)"
+
+    PATCH_RESPONSE=$(api_patch "/channels/$RECOVERY_CHANNEL_ID" "{\"parent_id\": \"$CATEGORY_ID\"}")
+    NEW_CHANNEL_ID=$(echo "$PATCH_RESPONSE" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('id',''))" 2>/dev/null || echo "")
+
+    if [ -z "$NEW_CHANNEL_ID" ]; then
+      log "ERROR: 복구 실패: ${PATCH_RESPONSE:0:200}"
+      send_message "$TICKET_CHANNEL_ID" "다이어리 복구에 실패했어요. 관리자에게 문의해주세요!" || true
+      COMPLETE_MSG_SENT=1
+      exit 1
+    fi
+
+    log "복구 완료: $NEW_CHANNEL_ID"
+
+    PERM_PAYLOAD='{"allow":"2252177770818560","deny":"16","type":1}'
+    api_put "/channels/$NEW_CHANNEL_ID/permissions/$USER_ID" "$PERM_PAYLOAD" > /dev/null || log "WARNING: 권한 복원 실패 — 계속 진행"
+
+    send_message "$NEW_CHANNEL_ID" "<@$USER_ID>" || log "WARNING: 채널 내 멘션 실패 — 계속 진행"
+
+    node -e "
+const Database = require('/workspace/project/node_modules/better-sqlite3');
+const db = new Database('/workspace/project/store/messages.db');
+const now = new Date().toISOString();
+db.prepare(\`
+  INSERT OR IGNORE INTO registered_groups
+  (jid, name, folder, trigger_pattern, requires_trigger, added_at)
+  VALUES (?, ?, ?, ?, 1, ?)
+\`).run(
+  'dc:' + process.argv[1],
+  '기숙사 다이어리 #' + process.argv[2],
+  'diaries/discord_diary_ch' + process.argv[1],
+  '@부엉이',
+  now
+);
+console.log('등록 확인: dc:' + process.argv[1]);
+" "$NEW_CHANNEL_ID" "$CHANNEL_NAME" || log "WARNING: 그룹 등록 확인 실패 — 계속 진행"
+
+    TEMPLATE_CLAUDE="/workspace/project/groups/discord_diary/CLAUDE.md"
+    TARGET_DIR="/workspace/project/groups/diaries/discord_diary_ch${NEW_CHANNEL_ID}"
+    if [ ! -d "$TARGET_DIR" ]; then
+      mkdir -p "$TARGET_DIR" && log "디렉토리 생성: $TARGET_DIR" || log "WARNING: 디렉토리 생성 실패"
+      if [ -f "$TEMPLATE_CLAUDE" ]; then
+        cp "$TEMPLATE_CLAUDE" "$TARGET_DIR/CLAUDE.md" \
+          && log "CLAUDE.md 복원 완료" \
+          || log "WARNING: CLAUDE.md 복사 실패 — 계속 진행"
+      fi
+    fi
+
+    COMPLETE_MSG="다이어리 복구 완료됐어요! 🎉
+<#$NEW_CHANNEL_ID>
+다시 기록 시작해봐요 📖"
+    send_message "$TICKET_CHANNEL_ID" "$COMPLETE_MSG" && COMPLETE_MSG_SENT=1 \
+      || log "ERROR: 복구 완료 메시지 발송 실패"
+
+  else
+    # ─── 새로 만들기: 기존 채널 삭제 후 신규 생성 ────────────────
+    log "[신규] 기존 채널 $RECOVERY_CHANNEL_ID 삭제..."
+    api_delete "/channels/$RECOVERY_CHANNEL_ID" > /dev/null || log "WARNING: 기존 채널 삭제 실패 — 계속 진행"
+
+    # 카테고리 용량 체크 (기존 채널이 다른 카테고리에 있었을 수 있으므로 재확인)
+    GUILD_CHANNELS=$(api_get "/guilds/$GUILD_ID/channels")
+    CAT_COUNT=$(echo "$GUILD_CHANNELS" | python3 -c "
+import json, sys
+channels = json.load(sys.stdin)
+count = sum(1 for c in channels if str(c.get('parent_id','')) == '$CATEGORY_ID')
+print(count)
+" 2>/dev/null || echo "0")
+
+    if [ "$CAT_COUNT" -ge 50 ]; then
+      log "카테고리 꽉 참 ($CAT_COUNT/50) — 휴면 정리 시도..."
+      CLEANED=0
+      for MONTHS in 6 5 4 3 2 1; do
+        DORMANT_MONTHS=$MONTHS DORMANT_TARGET_CAT=$CATEGORY_ID bash "$DORMANT_MOVE_SCRIPT" > /dev/null 2>&1 || true
+        GUILD_CHANNELS=$(api_get "/guilds/$GUILD_ID/channels")
+        CAT_COUNT=$(echo "$GUILD_CHANNELS" | python3 -c "
+import json, sys
+channels = json.load(sys.stdin)
+count = sum(1 for c in channels if str(c.get('parent_id','')) == '$CATEGORY_ID')
+print(count)
+" 2>/dev/null || echo "50")
+        if [ "$CAT_COUNT" -lt 50 ]; then CLEANED=1; break; fi
+      done
+
+      if [ "$CLEANED" -eq 0 ]; then
+        send_message "$TICKET_CHANNEL_ID" "다이어리 생성이 가능해요! 😊 다만 현재 기숙사 카테고리가 가득 찬 상태라 자동 생성이 어렵네요 🥲 관리자분이 확인하시는 대로 처리해드릴 테니 잠시만 기다려주세요 🦉" || true
+        COMPLETE_MSG_SENT=1
+        exit 1
+      fi
+    fi
+
+    log "신규 채널 생성: $CHANNEL_NAME in $CATEGORY_ID ($DORM_LABEL)"
+    CREATE_PAYLOAD=$(python3 -c "
+import json, sys
+print(json.dumps({'name': sys.argv[1], 'type': 0, 'parent_id': sys.argv[2]}))
+" "$CHANNEL_NAME" "$CATEGORY_ID")
+    CREATE_RESPONSE=$(api_post "/guilds/$GUILD_ID/channels" "$CREATE_PAYLOAD")
+    NEW_CHANNEL_ID=$(echo "$CREATE_RESPONSE" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('id',''))" 2>/dev/null || echo "")
+
+    if [ -z "$NEW_CHANNEL_ID" ]; then
+      log "ERROR: 채널 생성 실패: ${CREATE_RESPONSE:0:200}"
+      send_message "$TICKET_CHANNEL_ID" "채널 생성에 실패했어요. 관리자에게 문의해주세요!" || true
+      COMPLETE_MSG_SENT=1
+      exit 1
+    fi
+
+    log "신규 채널 생성됨: $NEW_CHANNEL_ID"
+
+    PERM_PAYLOAD='{"allow":"2252177770818560","deny":"16","type":1}'
+    api_put "/channels/$NEW_CHANNEL_ID/permissions/$USER_ID" "$PERM_PAYLOAD" > /dev/null || log "WARNING: 권한 설정 실패 — 계속 진행"
+
+    EVERYONE_PERM_PAYLOAD='{"allow":"0","deny":"377957124096","type":0}'
+    api_put "/channels/$NEW_CHANNEL_ID/permissions/$GUILD_ID" "$EVERYONE_PERM_PAYLOAD" > /dev/null || log "WARNING: @everyone 스레드 차단 설정 실패 — 계속 진행"
+
+    send_message "$NEW_CHANNEL_ID" "<@$USER_ID>" || log "WARNING: 채널 내 멘션 실패 — 계속 진행"
+
+    node -e "
+const Database = require('/workspace/project/node_modules/better-sqlite3');
+const db = new Database('/workspace/project/store/messages.db');
+const now = new Date().toISOString();
+db.prepare(\`
+  INSERT OR IGNORE INTO registered_groups
+  (jid, name, folder, trigger_pattern, requires_trigger, added_at)
+  VALUES (?, ?, ?, ?, 1, ?)
+\`).run(
+  'dc:' + process.argv[1],
+  '기숙사 다이어리 #' + process.argv[2],
+  'diaries/discord_diary_ch' + process.argv[1],
+  '@부엉이',
+  now
+);
+console.log('등록 완료: dc:' + process.argv[1]);
+" "$NEW_CHANNEL_ID" "$CHANNEL_NAME" || log "WARNING: 그룹 등록 실패 — 계속 진행"
+
+    TEMPLATE_CLAUDE="/workspace/project/groups/discord_diary/CLAUDE.md"
+    TARGET_DIR="/workspace/project/groups/diaries/discord_diary_ch${NEW_CHANNEL_ID}"
+    mkdir -p "$TARGET_DIR" || log "WARNING: 디렉토리 생성 실패 — 계속 진행"
+    if [ -f "$TEMPLATE_CLAUDE" ]; then
+      cp "$TEMPLATE_CLAUDE" "$TARGET_DIR/CLAUDE.md" \
+        && log "CLAUDE.md 생성 완료: $TARGET_DIR" \
+        || log "WARNING: CLAUDE.md 복사 실패 — 계속 진행"
+    else
+      log "WARNING: 템플릿 CLAUDE.md 없음, 건너뜀"
+    fi
+
+    COMPLETE_MSG="새 다이어리가 만들어졌어요! 🎉
+<#$NEW_CHANNEL_ID>
+열공하세요!"
+    send_message "$TICKET_CHANNEL_ID" "$COMPLETE_MSG" && COMPLETE_MSG_SENT=1 \
+      || log "ERROR: 완료 메시지 발송 실패"
+  fi
+
+  exit 0
+fi
+
+# ─── 메인 플로우 ──────────────────────────────────────────────────
 log "=== diary-create 시작: user=$USER_ID ticket=$TICKET_CHANNEL_ID ==="
 
-# ─── 1단계: 대기 메시지 ───────────────────────────────────────────────
+# ─── 1단계: 대기 메시지 ───────────────────────────────────────────
 log "[1/9] 대기 메시지 발송..."
 send_message "$TICKET_CHANNEL_ID" "잠시만 기다려주세요! 💛" || log "WARNING: 대기 메시지 발송 실패 — 계속 진행"
 
-# ─── 2단계: 사용자 정보 조회 ──────────────────────────────────────────
+# ─── 2단계: 사용자 정보 조회 ──────────────────────────────────────
 log "[2/9] 사용자 정보 조회..."
 MEMBER_JSON=$(api_get "/guilds/$GUILD_ID/members/$USER_ID")
 
@@ -163,7 +381,7 @@ fi
 
 log "사용자 닉네임: $USER_NICK"
 
-# ─── 기숙사 역할 매칭 ─────────────────────────────────────────────────
+# ─── 기숙사 역할 매칭 ─────────────────────────────────────────────
 DORM_ROLE_ID=""
 for role_id in $USER_ROLES; do
   if [ -n "${DORM_CATEGORY[$role_id]:-}" ]; then
@@ -183,7 +401,7 @@ CATEGORY_ID="${DORM_CATEGORY[$DORM_ROLE_ID]}"
 DORM_LABEL="${DORM_NAME[$DORM_ROLE_ID]}"
 log "[3/9] 기숙사 매칭: $DORM_LABEL ($DORM_ROLE_ID) → 카테고리 $CATEGORY_ID"
 
-# ─── 채널명 생성 ──────────────────────────────────────────────────────
+# ─── 채널명 생성 ──────────────────────────────────────────────────
 CHANNEL_NAME=$(echo "$USER_NICK" | python3 -c "
 import sys, re
 nick = sys.stdin.read().strip()
@@ -202,10 +420,10 @@ log "[4/9] 채널명: $CHANNEL_NAME"
 log "[4.5/9] 기존 다이어리 채널 검색..."
 GUILD_CHANNELS=$(api_get "/guilds/$GUILD_ID/channels")
 
-# 결과 형식: "<channel_id> <status>"
+# 결과 형식: "<channel_id> <status> <channel_name>"
 #   status=same     : 이미 현재 기숙사 카테고리에 있음 (중복 → 리다이렉트)
-#   status=move     : 다른 활성 기숙사 카테고리에 있음 (기숙사 변경 → 복구)
-#   status=recover  : 휴면 카테고리에 있음 (휴면 → 복구)
+#   status=move     : 다른 활성 기숙사 카테고리에 있음 (기숙사 변경 → 이어쓰기 여부 확인)
+#   status=recover  : 휴면 카테고리에 있음 (휴면 → 이어쓰기 여부 확인)
 SEARCH_RESULT=$(echo "$GUILD_CHANNELS" | python3 -c "
 import json, sys, re
 
@@ -223,7 +441,7 @@ for ch in channels:
     for ow in ch.get('permission_overwrites', []):
         if ow.get('type') == 1 and str(ow.get('id')) == user_id:
             status = 'same' if pid == target_cat else 'move'
-            print(f\"{ch['id']} {status}\")
+            print(f\"{ch['id']} {status} {ch.get('name','')}\")
             sys.exit(0)
 
 # 2. 휴면 카테고리에서 채널 이름으로 검색
@@ -234,18 +452,16 @@ for ch in channels:
     if pid not in dormant_cats:
         continue
     if ch.get('name', '').lower() == nick.lower():
-        print(f\"{ch['id']} recover\")
+        print(f\"{ch['id']} recover {ch.get('name','')}\")
         sys.exit(0)
 
 sys.exit(0)
 " 2>/dev/null || echo "")
 
-RECOVERY_MODE=0
-RECOVERY_CHANNEL_ID=""
-
 if [ -n "$SEARCH_RESULT" ]; then
   FOUND_CH=$(echo "$SEARCH_RESULT" | awk '{print $1}')
   FOUND_STATUS=$(echo "$SEARCH_RESULT" | awk '{print $2}')
+  FOUND_NAME=$(echo "$SEARCH_RESULT" | awk '{print $3}')
 
   if [ "$FOUND_STATUS" = "same" ]; then
     log "기존 다이어리 채널 발견 (현재 기숙사): $FOUND_CH — 중복 생성 차단"
@@ -256,15 +472,42 @@ if [ -n "$SEARCH_RESULT" ]; then
     COMPLETE_MSG_SENT=1
     exit 0
   else
-    log "기존 다이어리 발견 ($FOUND_STATUS): $FOUND_CH → 복구 모드"
-    RECOVERY_MODE=1
-    RECOVERY_CHANNEL_ID="$FOUND_CH"
+    # 기존 다이어리 발견 (다른 기숙사 또는 휴면) → 이어쓰기 여부 확인
+    log "기존 다이어리 발견 ($FOUND_STATUS): $FOUND_CH ($FOUND_NAME) → 이어쓰기 여부 확인"
+
+    # 상태 파일 저장 (72시간 만료)
+    STATE_FILE="/tmp/diary-confirm-${TICKET_CHANNEL_ID}.json"
+    python3 -c "
+import json, time, sys
+data = {
+    'created_at': int(time.time()),
+    'user_id': sys.argv[1],
+    'existing_channel_id': sys.argv[2],
+    'channel_name': sys.argv[3],
+    'category_id': sys.argv[4],
+    'dorm_label': sys.argv[5],
+    'found_status': sys.argv[6]
+}
+with open(sys.argv[7], 'w') as f:
+    json.dump(data, f)
+print('저장 완료')
+" "$USER_ID" "$FOUND_CH" "$CHANNEL_NAME" "$CATEGORY_ID" "$DORM_LABEL" "$FOUND_STATUS" "$STATE_FILE" \
+      && log "상태 파일 저장: $STATE_FILE" \
+      || log "WARNING: 상태 파일 저장 실패"
+
+    DISPLAY_NAME="${FOUND_NAME:-기존 다이어리}"
+    CONFIRM_MSG="기존 다이어리가 있어요! 💛
+**#${DISPLAY_NAME}**
+이어서 쓰시겠어요? **네** 또는 **아니요**로 답해주세요 🦉
+_(아니요 선택 시 기존 다이어리가 삭제되고 새로 생성돼요)_"
+
+    send_message "$TICKET_CHANNEL_ID" "$CONFIRM_MSG" || log "WARNING: 확인 메시지 발송 실패"
+    COMPLETE_MSG_SENT=1  # 확인 메시지를 보냈으므로 EXIT trap 에러 알림 불필요
+    exit 0
   fi
 fi
 
-log "$([ $RECOVERY_MODE -eq 1 ] && echo '복구 모드' || echo '신규 생성 모드')"
-
-# ─── 4.6단계: 카테고리 용량 체크 + 자동 정리 ─────────────────────────
+# ─── 4.6단계: 카테고리 용량 체크 + 자동 정리 ─────────────────────
 log "[4.6/9] 카테고리 용량 체크: $CATEGORY_ID ($DORM_LABEL)"
 
 CAT_COUNT=$(echo "$GUILD_CHANNELS" | python3 -c "
@@ -305,79 +548,9 @@ print(count)
   fi
 fi
 
-# ─── 5단계: 복구 또는 신규 생성 ──────────────────────────────────────
-if [ "$RECOVERY_MODE" -eq 1 ]; then
-  # ─── 복구 플로우 ────────────────────────────────────────────────────
-  log "[5/9] 다이어리 복구: $RECOVERY_CHANNEL_ID → 카테고리 $CATEGORY_ID"
-
-  PATCH_RESPONSE=$(api_patch "/channels/$RECOVERY_CHANNEL_ID" "{\"parent_id\": \"$CATEGORY_ID\"}")
-  NEW_CHANNEL_ID=$(echo "$PATCH_RESPONSE" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('id',''))" 2>/dev/null || echo "")
-
-  if [ -z "$NEW_CHANNEL_ID" ]; then
-    log "ERROR: 복구 실패: ${PATCH_RESPONSE:0:200}"
-    send_message "$TICKET_CHANNEL_ID" "다이어리 복구에 실패했어요. 관리자에게 문의해주세요!" || true
-    COMPLETE_MSG_SENT=1
-    exit 1
-  fi
-
-  log "[6/9] 복구 완료: $NEW_CHANNEL_ID"
-
-  # ─── 7단계: 권한 복원 ───────────────────────────────────────────────
-  log "[7/9] 권한 복원..."
-  PERM_PAYLOAD='{"allow":"2252177770818560","deny":"16","type":1}'
-  api_put "/channels/$NEW_CHANNEL_ID/permissions/$USER_ID" "$PERM_PAYLOAD" > /dev/null || log "WARNING: 권한 복원 실패 — 계속 진행"
-
-  send_message "$NEW_CHANNEL_ID" "<@$USER_ID>" || log "WARNING: 채널 내 멘션 실패 — 계속 진행"
-
-  # ─── 8단계: NanoClaw 그룹 등록 확인 ────────────────────────────────
-  log "[8/9] NanoClaw 그룹 등록 확인..."
-  node -e "
-const Database = require('/workspace/project/node_modules/better-sqlite3');
-const db = new Database('/workspace/project/store/messages.db');
-const now = new Date().toISOString();
-db.prepare(\`
-  INSERT OR IGNORE INTO registered_groups
-  (jid, name, folder, trigger_pattern, requires_trigger, added_at)
-  VALUES (?, ?, ?, ?, 1, ?)
-\`).run(
-  'dc:' + process.argv[1],
-  '기숙사 다이어리 #' + process.argv[2],
-  'diaries/discord_diary_ch' + process.argv[1],
-  '@부엉이',
-  now
-);
-console.log('등록 확인: dc:' + process.argv[1]);
-" "$NEW_CHANNEL_ID" "$CHANNEL_NAME" || log "WARNING: 그룹 등록 확인 실패 — 계속 진행"
-
-  # CLAUDE.md 디렉토리 확인 (없으면 생성)
-  TEMPLATE_CLAUDE="/workspace/project/groups/discord_diary/CLAUDE.md"
-  TARGET_DIR="/workspace/project/groups/diaries/discord_diary_ch${NEW_CHANNEL_ID}"
-  if [ ! -d "$TARGET_DIR" ]; then
-    mkdir -p "$TARGET_DIR" && log "디렉토리 생성: $TARGET_DIR" || log "WARNING: 디렉토리 생성 실패"
-    if [ -f "$TEMPLATE_CLAUDE" ]; then
-      cp "$TEMPLATE_CLAUDE" "$TARGET_DIR/CLAUDE.md" \
-        && log "CLAUDE.md 복원 완료" \
-        || log "WARNING: CLAUDE.md 복사 실패 — 계속 진행"
-    fi
-  fi
-
-  # ─── 9단계: 복구 완료 메시지 ────────────────────────────────────────
-  log "[9/9] 복구 완료 메시지 발송..."
-  COMPLETE_MSG="다이어리 복구 완료됐어요! 🎉
-<#$NEW_CHANNEL_ID>
-다시 기록 시작해봐요 📖"
-
-  if send_message "$TICKET_CHANNEL_ID" "$COMPLETE_MSG"; then
-    COMPLETE_MSG_SENT=1
-    log "✅ 다이어리 복구 완료: $CHANNEL_NAME ($NEW_CHANNEL_ID)"
-  else
-    log "ERROR: 복구 완료 메시지 발송 실패 — EXIT trap에서 관리자 알림 전송 예정"
-  fi
-
-else
-  # ─── 신규 생성 플로우 ────────────────────────────────────────────────
-  log "[5/9] 다이어리 채널 생성..."
-  CREATE_PAYLOAD=$(python3 -c "
+# ─── 5단계: 신규 생성 ─────────────────────────────────────────────
+log "[5/9] 다이어리 채널 생성..."
+CREATE_PAYLOAD=$(python3 -c "
 import json, sys
 print(json.dumps({
     'name': sys.argv[1],
@@ -386,34 +559,33 @@ print(json.dumps({
 }))
 " "$CHANNEL_NAME" "$CATEGORY_ID")
 
-  CREATE_RESPONSE=$(api_post "/guilds/$GUILD_ID/channels" "$CREATE_PAYLOAD")
-  NEW_CHANNEL_ID=$(echo "$CREATE_RESPONSE" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('id',''))" 2>/dev/null || echo "")
+CREATE_RESPONSE=$(api_post "/guilds/$GUILD_ID/channels" "$CREATE_PAYLOAD")
+NEW_CHANNEL_ID=$(echo "$CREATE_RESPONSE" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('id',''))" 2>/dev/null || echo "")
 
-  if [ -z "$NEW_CHANNEL_ID" ]; then
-    log "ERROR: 채널 생성 실패: ${CREATE_RESPONSE:0:200}"
-    send_message "$TICKET_CHANNEL_ID" "채널 생성에 실패했어요. 관리자에게 문의해주세요!" || true
-    COMPLETE_MSG_SENT=1
-    exit 1
-  fi
+if [ -z "$NEW_CHANNEL_ID" ]; then
+  log "ERROR: 채널 생성 실패: ${CREATE_RESPONSE:0:200}"
+  send_message "$TICKET_CHANNEL_ID" "채널 생성에 실패했어요. 관리자에게 문의해주세요!" || true
+  COMPLETE_MSG_SENT=1
+  exit 1
+fi
 
-  log "[6/9] 채널 생성됨: $NEW_CHANNEL_ID"
+log "[6/9] 채널 생성됨: $NEW_CHANNEL_ID"
 
-  # ─── 7단계: 권한 설정 ───────────────────────────────────────────────
-  log "[7/9] 권한 설정..."
-  # 채널 주인: allow VIEW_CHANNEL(1024) + SEND_MESSAGES(2048) + MANAGE_MESSAGES(8192) + CREATE_PUBLIC_THREADS(34359738368) + CREATE_PRIVATE_THREADS(68719476736) + SEND_MESSAGES_IN_THREADS(274877906944) + PIN_MESSAGES(2251799813685248) = 2252177770818560, deny MANAGE_CHANNELS(16)
-  PERM_PAYLOAD='{"allow":"2252177770818560","deny":"16","type":1}'
-  api_put "/channels/$NEW_CHANNEL_ID/permissions/$USER_ID" "$PERM_PAYLOAD" > /dev/null || log "WARNING: 권한 설정 실패 — 계속 진행"
+# ─── 7단계: 권한 설정 ───────────────────────────────────────────
+log "[7/9] 권한 설정..."
+# 채널 주인: allow VIEW_CHANNEL(1024) + SEND_MESSAGES(2048) + MANAGE_MESSAGES(8192) + CREATE_PUBLIC_THREADS(34359738368) + CREATE_PRIVATE_THREADS(68719476736) + SEND_MESSAGES_IN_THREADS(274877906944) + PIN_MESSAGES(2251799813685248) = 2252177770818560, deny MANAGE_CHANNELS(16)
+PERM_PAYLOAD='{"allow":"2252177770818560","deny":"16","type":1}'
+api_put "/channels/$NEW_CHANNEL_ID/permissions/$USER_ID" "$PERM_PAYLOAD" > /dev/null || log "WARNING: 권한 설정 실패 — 계속 진행"
 
-  # @everyone: SEND_MESSAGES(2048) + CREATE_PUBLIC_THREADS(34359738368) + CREATE_PRIVATE_THREADS(68719476736) + SEND_MESSAGES_IN_THREADS(274877906944) deny
-  # = 377957124096 (다이어리는 주인만 작성, 다른 멤버는 이모지 반응만 가능)
-  EVERYONE_PERM_PAYLOAD='{"allow":"0","deny":"377957124096","type":0}'
-  api_put "/channels/$NEW_CHANNEL_ID/permissions/$GUILD_ID" "$EVERYONE_PERM_PAYLOAD" > /dev/null || log "WARNING: @everyone 스레드 차단 설정 실패 — 계속 진행"
+# @everyone: SEND_MESSAGES(2048) + CREATE_PUBLIC_THREADS(34359738368) + CREATE_PRIVATE_THREADS(68719476736) + SEND_MESSAGES_IN_THREADS(274877906944) deny
+EVERYONE_PERM_PAYLOAD='{"allow":"0","deny":"377957124096","type":0}'
+api_put "/channels/$NEW_CHANNEL_ID/permissions/$GUILD_ID" "$EVERYONE_PERM_PAYLOAD" > /dev/null || log "WARNING: @everyone 스레드 차단 설정 실패 — 계속 진행"
 
-  send_message "$NEW_CHANNEL_ID" "<@$USER_ID>" || log "WARNING: 채널 내 멘션 실패 — 계속 진행"
+send_message "$NEW_CHANNEL_ID" "<@$USER_ID>" || log "WARNING: 채널 내 멘션 실패 — 계속 진행"
 
-  # ─── 8단계: NanoClaw 그룹 등록 및 CLAUDE.md 생성 ─────────────────────
-  log "[8/9] NanoClaw 그룹 등록 및 CLAUDE.md 생성..."
-  node -e "
+# ─── 8단계: NanoClaw 그룹 등록 및 CLAUDE.md 생성 ─────────────────────
+log "[8/9] NanoClaw 그룹 등록 및 CLAUDE.md 생성..."
+node -e "
 const Database = require('/workspace/project/node_modules/better-sqlite3');
 const db = new Database('/workspace/project/store/messages.db');
 const now = new Date().toISOString();
@@ -431,29 +603,27 @@ db.prepare(\`
 console.log('등록 완료: dc:' + process.argv[1]);
 " "$NEW_CHANNEL_ID" "$CHANNEL_NAME" || log "WARNING: 그룹 등록 실패 (이미 등록됐거나 권한 문제) — 계속 진행"
 
-  # canonical 다이어리 템플릿(호스트 registerGroup 과 동일 소스) 사용, 학생 폴더를 템플릿으로 쓰지 않음.
-  TEMPLATE_CLAUDE="/workspace/project/groups/discord_diary/CLAUDE.md"
-  TARGET_DIR="/workspace/project/groups/diaries/discord_diary_ch${NEW_CHANNEL_ID}"
-  mkdir -p "$TARGET_DIR" || log "WARNING: 디렉토리 생성 실패 — 계속 진행"
-  if [ -f "$TEMPLATE_CLAUDE" ]; then
-    cp "$TEMPLATE_CLAUDE" "$TARGET_DIR/CLAUDE.md" \
-      && log "CLAUDE.md 생성 완료: $TARGET_DIR" \
-      || log "WARNING: CLAUDE.md 복사 실패 — 계속 진행"
-  else
-    log "WARNING: 템플릿 CLAUDE.md 없음, 건너뜀"
-  fi
+# canonical 다이어리 템플릿(호스트 registerGroup 과 동일 소스) 사용, 학생 폴더를 템플릿으로 쓰지 않음.
+TEMPLATE_CLAUDE="/workspace/project/groups/discord_diary/CLAUDE.md"
+TARGET_DIR="/workspace/project/groups/diaries/discord_diary_ch${NEW_CHANNEL_ID}"
+mkdir -p "$TARGET_DIR" || log "WARNING: 디렉토리 생성 실패 — 계속 진행"
+if [ -f "$TEMPLATE_CLAUDE" ]; then
+  cp "$TEMPLATE_CLAUDE" "$TARGET_DIR/CLAUDE.md" \
+    && log "CLAUDE.md 생성 완료: $TARGET_DIR" \
+    || log "WARNING: CLAUDE.md 복사 실패 — 계속 진행"
+else
+  log "WARNING: 템플릿 CLAUDE.md 없음, 건너뜀"
+fi
 
-  # ─── 9단계: 완료 메시지 ───────────────────────────────────────────────
-  log "[9/9] 완료 메시지 발송..."
-  COMPLETE_MSG="다 만들어졌습니다! 🎉
+# ─── 9단계: 완료 메시지 ───────────────────────────────────────────────
+log "[9/9] 완료 메시지 발송..."
+COMPLETE_MSG="다 만들어졌습니다! 🎉
 <#$NEW_CHANNEL_ID>
 열공하세요!"
 
-  if send_message "$TICKET_CHANNEL_ID" "$COMPLETE_MSG"; then
-    COMPLETE_MSG_SENT=1
-    log "✅ 다이어리 생성 완료: $CHANNEL_NAME ($NEW_CHANNEL_ID)"
-  else
-    log "ERROR: 완료 메시지 발송 실패 — EXIT trap에서 관리자 알림 전송 예정"
-  fi
-
+if send_message "$TICKET_CHANNEL_ID" "$COMPLETE_MSG"; then
+  COMPLETE_MSG_SENT=1
+  log "✅ 다이어리 생성 완료: $CHANNEL_NAME ($NEW_CHANNEL_ID)"
+else
+  log "ERROR: 완료 메시지 발송 실패 — EXIT trap에서 관리자 알림 전송 예정"
 fi

@@ -40,6 +40,55 @@ bash /home/node/.claude/skills/post-discord/post.sh <CHANNEL_ID> "안녕하세�
 
 ---
 
+## 🔄 다이어리 이어쓰기 확인 대기 처리
+
+메시지를 받으면 **다이어리 의도 판단 전에** 먼저 해당 채널의 확인 대기 상태 파일을 확인한다.
+
+```bash
+ls /tmp/diary-confirm-<CHANNEL_ID>.json 2>/dev/null && echo "EXISTS" || echo "NONE"
+```
+
+**파일이 존재하면:**
+
+1. **만료 체크** (72시간 = 259200초):
+   ```bash
+   python3 -c "
+   import json, time
+   d = json.load(open('/tmp/diary-confirm-<CHANNEL_ID>.json'))
+   elapsed = int(time.time()) - d.get('created_at', 0)
+   print('expired' if elapsed > 259200 else 'valid')
+   "
+   ```
+   - `expired` → `rm -f /tmp/diary-confirm-<CHANNEL_ID>.json` 후 아래 일반 메시지 처리로 진행
+   - `valid` → 아래 응답 분기 실행
+
+2. **메시지 내용으로 긍정/부정 판단:**
+
+   **긍정** ("네", "응", "ㅇ", "ㅇㅇ", "yes", "이어서", "복구", "계속" 포함):
+   ```bash
+   bash /home/node/.claude/skills/diary-create/create-diary.sh --confirm-recover <CHANNEL_ID>
+   ```
+   - 스크립트가 복구 + 완료 메시지까지 직접 Discord로 전송
+   - 에이전트는 `<internal>완료</internal>`만 출력
+
+   **부정** ("아니요", "ㄴ", "아니", "no", "새로", "새 다이어리", "삭제", "새거", "새롭게" 포함):
+   ```bash
+   bash /home/node/.claude/skills/diary-create/create-diary.sh --confirm-new <CHANNEL_ID>
+   ```
+   - 스크립트가 기존 채널 삭제 + 신규 생성 + 완료 메시지까지 처리
+   - 에이전트는 `<internal>완료</internal>`만 출력
+
+   **애매한 응답** (위 패턴 해당 없음):
+   ```bash
+   bash /home/node/.claude/skills/post-discord/post.sh <CHANNEL_ID> "**네** (기존 다이어리 이어쓰기) 또는 **아니요** (새로 생성)로 답해주세요 🦉"
+   ```
+
+**파일이 없으면** 이 섹션을 건너뛰고 아래 일반 메시지 처리 규칙으로 진행한다.
+
+**주의**: `--confirm-recover`/`--confirm-new` 실행 후 추가 메시지 절대 금지. 스크립트가 모든 Discord 전송을 담당한다.
+
+---
+
 ## 🎯 다이어리 관련 메시지 처리
 
 "다이어리"라는 단어가 포함된 메시지를 받으면, **먼저 의도를 파악**한다.
