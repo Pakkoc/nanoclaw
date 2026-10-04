@@ -273,7 +273,122 @@ EOM
 - 레벨 매핑: 1=마법학도, 2=견습마법사, 3=수습마법사, 4=초급마법사, 5=숙련마법사, 6=중급마법사, 7=정예마법사, 8=대마법사, 9=현자, 10+=현자
 - 시간 변환: hours → \`XXh XXm\` (예: 93.9시간 → \`93h 54m\`, 311.6시간 → \`311h 36m\`)
 - 멘션은 \`<@user_id>\` 형식으로 (닉네임 아닌 실제 Discord user_id)
-- TOP10/TOP3 모두 1위부터 순서대로`;
+- TOP10/TOP3 모두 1위부터 순서대로
+
+## 수석/차석 닉네임 교체
+
+공지 게시 완료 후, 공부시간 **1위(수석)·2위(차석)** 닉네임을 자동 교체한다.
+
+### STEP 1 — 지난 달 수석/차석 상태 읽기
+
+\`\`\`bash
+cat /workspace/group/rank-state.json 2>/dev/null || echo '{"수석_id":null,"차석_id":null}'
+\`\`\`
+
+파일이 없으면 첫 실행으로 간주하고 STEP 3부터 진행.
+
+### STEP 2 — 변경 필요 여부 확인
+
+- 이번 달 공부시간 TOP1 user_id = \`NEW_1ST\`, TOP2 user_id = \`NEW_2ND\`
+- 파일의 \`수석_id\` == \`NEW_1ST\` **AND** \`차석_id\` == \`NEW_2ND\` 이면 → **변경 없음, STEP 6으로 건너뜀**
+- 하나라도 다르면 → STEP 3 진행
+
+### STEP 3 — 기존 수석/차석 닉네임 복원
+
+기존 수석/차석 user_id(rank-state.json의 수석_id, 차석_id)가 있으면 각각 Discord API로 복원.
+
+각 user_id에 대해:
+1. \`GET /guilds/1213133289498615818/members/<user_id>\` 로 멤버 정보 조회
+2. 현재 닉네임에서 수석/차석 태그(\`[🪄수석]\` 또는 \`[🔮차석]\`) 제거
+3. 멤버의 roles에서 아래 역할 태그 매핑으로 실제 직군 태그 찾기:
+   - 1231137889820348466=직장인, 1231137947986690058=취준생, 1214915849173864449=대학원생
+   - 1231137780587827280=대학생, 1214226040982081617=N수생, 1231137854927671359=고등학생
+   - 1213786818424606730=중학생, 1216973850659524709=독학법사
+4. 새 닉네임 = \`[역할태그] 이름\` 형식으로 재조합
+5. \`PATCH /guilds/1213133289498615818/members/<user_id>\` 로 닉네임 변경
+
+\`\`\`bash
+source /workspace/global/tools.env
+GUILD="1213133289498615818"
+OLD_1ST="<rank-state.json의 수석_id>"
+OLD_2ND="<rank-state.json의 차석_id>"
+
+for USER_ID in "$OLD_1ST" "$OLD_2ND"; do
+  [ -z "$USER_ID" ] || [ "$USER_ID" = "null" ] && continue
+  MEMBER=$(curl -s -H "Authorization: Bot $DISCORD_BOT_TOKEN" -H "User-Agent: DiscordBot/1.0" \\
+    "https://discord.com/api/v10/guilds/$GUILD/members/$USER_ID")
+  NEW_NICK=$(echo "$MEMBER" | python3 << 'PYEOF'
+import json, sys, re
+m = json.load(sys.stdin)
+nick = m.get('nick') or m.get('user',{}).get('global_name') or m.get('user',{}).get('username') or ''
+role_map = {"1231137889820348466":"직장인","1231137947986690058":"취준생","1214915849173864449":"대학원생","1231137780587827280":"대학생","1214226040982081617":"N수생","1231137854927671359":"고등학생","1213786818424606730":"중학생","1216973850659524709":"독학법사"}
+roles = m.get('roles', [])
+role_tag = next((role_map[r] for r in roles if r in role_map), None)
+base = re.sub(r'^\[[^\]]+\]\s*', '', nick).strip()
+print(f'[{role_tag}] {base}' if role_tag else base)
+PYEOF
+)
+  PAYLOAD=$(python3 -c "import json,sys; print(json.dumps({'nick': sys.argv[1]}))" "$NEW_NICK")
+  curl -s -o /dev/null -w "%{http_code}" -X PATCH "https://discord.com/api/v10/guilds/$GUILD/members/$USER_ID" \\
+    -H "Authorization: Bot $DISCORD_BOT_TOKEN" -H "Content-Type: application/json" -H "User-Agent: DiscordBot/1.0" \\
+    -d "$PAYLOAD" && echo " restored $USER_ID → $NEW_NICK"
+  sleep 0.5
+done
+\`\`\`
+
+### STEP 4 — 새 수석/차석 닉네임 설정
+
+각 새 TOP1/TOP2 user_id에 대해:
+1. \`GET /guilds/1213133289498615818/members/<user_id>\` 로 현재 닉네임 조회
+2. 기존 \`[...]\` 태그를 제거한 이름(base)만 추출
+3. TOP1 → \`[🪄수석] base\`, TOP2 → \`[🔮차석] base\`
+4. \`PATCH\` 로 닉네임 업데이트
+
+\`\`\`bash
+set_rank() {
+  local USER_ID="$1" RANK_TAG="$2"
+  MEMBER=$(curl -s -H "Authorization: Bot $DISCORD_BOT_TOKEN" -H "User-Agent: DiscordBot/1.0" \\
+    "https://discord.com/api/v10/guilds/$GUILD/members/$USER_ID")
+  NEW_NICK=$(echo "$MEMBER" | RANK_TAG="$RANK_TAG" python3 << 'PYEOF'
+import json, sys, re, os
+m = json.load(sys.stdin)
+rank_tag = os.environ['RANK_TAG']
+nick = m.get('nick') or m.get('user',{}).get('global_name') or m.get('user',{}).get('username') or ''
+base = re.sub(r'^\[[^\]]+\]\s*', '', nick).strip()
+print(f'[{rank_tag}] {base}')
+PYEOF
+)
+  PAYLOAD=$(python3 -c "import json,sys; print(json.dumps({'nick': sys.argv[1]}))" "$NEW_NICK")
+  curl -s -o /dev/null -w "%{http_code}" -X PATCH "https://discord.com/api/v10/guilds/$GUILD/members/$USER_ID" \\
+    -H "Authorization: Bot $DISCORD_BOT_TOKEN" -H "Content-Type: application/json" -H "User-Agent: DiscordBot/1.0" \\
+    -d "$PAYLOAD" && echo " set $USER_ID → $NEW_NICK"
+  sleep 0.5
+}
+
+set_rank "<NEW_1ST>" "🪄수석"
+set_rank "<NEW_2ND>" "🔮차석"
+\`\`\`
+
+\`<NEW_1ST>\`, \`<NEW_2ND>\`는 이번 달 공부시간 TOP1·TOP2 user_id로 치환.
+
+### STEP 5 — rank-state.json 업데이트
+
+\`\`\`bash
+cat > /workspace/group/rank-state.json << JSONEOF
+{"수석_id":"<NEW_1ST>","차석_id":"<NEW_2ND>","updated":"<YYYY-MM>"}
+JSONEOF
+\`\`\`
+
+### STEP 6 — 관리자 채널 응답에 수석/차석 처리 결과 한 줄 추가
+
+- 변경 없음: \`{PREV_MONTH}월 랭킹 공지 완료 ✅ (수석/차석 변동 없음)\`
+- 변경됨: \`{PREV_MONTH}월 랭킹 공지 완료 ✅ 수석→<닉네임>, 차석→<닉네임> 교체 완료\`
+
+### 주의사항
+
+- 닉네임 변경 대상에 관리자(성호·요나새·죨디·호녈·초코슈·운명교향곡·나린) user_id가 포함되면 **건너뜀** (관리자 목록: 364764044948799491, 276024344101257216, 459757901251346452, 1341276764827156555, 1397824633805475905, 845167421069590560, 537616840898248705)
+- Discord API HTTP 429(rate limit) 응답 시 1초 대기 후 1회 재시도
+- PATCH 실패 시 에러 메시지를 관리자 채널 응답에 포함`;
 
 // ─────────────── 태스크 정의 ───────────────
 
