@@ -141,20 +141,22 @@ def get_owner_from_first_message(channel_id):
 def get_thread_stats(channel_id):
     """
     채널의 모든 스레드에서:
-    - 가장 최근 메시지 시간(ms) — 6개월 비활성 판단에 사용
+    - 가장 최근 메시지 시간(ms) — 비활성 판단에 사용
     - 스레드 메시지 총 수 — 삭제 기준에 사용 (message_count 필드, 최대 50까지 집계)
     반환: (latest_ms, total_thread_msg_count)
+
+    주의: 활성 스레드는 /channels/{id}/threads/active 가 제대로 동작하지 않아
+    guild 전체 활성 스레드(GUILD_ACTIVE_THREADS)를 미리 캐싱해 parent_id로 필터링.
     """
     latest_ms = 0
     total_count = 0
 
     threads = []
 
-    # 활성 스레드
-    active = api_get(f"/channels/{channel_id}/threads/active")
-    if isinstance(active, dict):
-        threads.extend(active.get("threads", []))
-    time.sleep(0.2)
+    # 활성 스레드 — guild 전체 캐시에서 이 채널 소속만 추출
+    for t in GUILD_ACTIVE_THREADS:
+        if t.get("parent_id") == channel_id:
+            threads.append(t)
 
     # 아카이브된 공개 스레드
     archived = api_get(f"/channels/{channel_id}/threads/archived/public?limit=100")
@@ -197,6 +199,12 @@ def remove_user_overwrites(channel_id, overwrites):
 all_channels = api_get(f"/guilds/{GUILD_ID}/channels")
 if not isinstance(all_channels, list):
     print(json.dumps({"wakeAgent": False, "error": "채널 조회 실패"}))
+
+# ─── 1-1. Guild 전체 활성 스레드 캐싱 ──────────────────────────────────
+# /channels/{id}/threads/active 는 해당 채널의 활성 스레드를 반환하지 않는 경우가 있음.
+# guild 전체 활성 스레드를 한 번에 가져와 parent_id로 필터링하는 방식 사용.
+_active_data = api_get(f"/guilds/{GUILD_ID}/threads/active")
+GUILD_ACTIVE_THREADS = _active_data.get("threads", []) if isinstance(_active_data, dict) else []
     sys.exit(0)
 
 # ─── 2. 서버 멤버 전체 조회 (페이지네이션) ─────────────────────────────
