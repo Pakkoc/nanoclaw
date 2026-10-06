@@ -226,13 +226,15 @@ const monthlyRankingPrompt = `매월 1일 오전 9시 — 월간 랭킹 공지
 
 1. 공부시간 TOP 10 — SQL의 날짜 리터럴은 위에서 계산한 실제 날짜로 치환:
    \`\`\`bash
-   bash /home/node/.claude/skills/db-query/db-query.sh "SELECT u.user_id, u.nickname, u.level, ROUND(SUM(v.duration_seconds)/3600.0, 1) AS hours FROM voice_sessions_clean v JOIN users_clean u ON u.user_id = v.user_id WHERE v.started_at >= ${Q}<전월1일>${Q} AND v.started_at < ${Q}<당월1일>${Q} AND u.user_id NOT IN ('364764044948799491','276024344101257216','459757901251346452','1341276764827156555','1397824633805475905','845167421069590560','537616840898248705') GROUP BY u.user_id, u.nickname, u.level ORDER BY hours DESC LIMIT 10"
+   bash /home/node/.claude/skills/db-query/db-query.sh "SELECT u.user_id, u.nickname, u.level_name, (ROUND(SUM(v.duration_seconds)/60.0)::int / 60) || ${Q}h ${Q} || (ROUND(SUM(v.duration_seconds)/60.0)::int % 60) || ${Q}m${Q} AS study_time FROM voice_sessions_clean v JOIN users_clean u ON u.user_id = v.user_id WHERE v.started_at >= ${Q}<전월1일>${Q} AND v.started_at < ${Q}<당월1일>${Q} AND u.user_id NOT IN ('364764044948799491','276024344101257216','459757901251346452','1341276764827156555','1397824633805475905','845167421069590560','537616840898248705') GROUP BY u.user_id, u.nickname, u.level_name ORDER BY SUM(v.duration_seconds) DESC LIMIT 10"
    \`\`\`
 2. 이모지 반응 TOP 3:
    \`\`\`bash
-   bash /home/node/.claude/skills/db-query/db-query.sh "SELECT u.user_id, u.nickname, u.level, SUM(r.count) AS emoji_count FROM reaction_usage_clean r JOIN users_clean u ON u.user_id = r.user_id WHERE r.usage_date >= ${Q}<전월1일>${Q} AND r.usage_date < ${Q}<당월1일>${Q} GROUP BY u.user_id, u.nickname, u.level ORDER BY emoji_count DESC LIMIT 3"
+   bash /home/node/.claude/skills/db-query/db-query.sh "SELECT u.user_id, u.nickname, u.level_name, SUM(r.count) AS emoji_count FROM reaction_usage_clean r JOIN users_clean u ON u.user_id = r.user_id WHERE r.usage_date >= ${Q}<전월1일>${Q} AND r.usage_date < ${Q}<당월1일>${Q} GROUP BY u.user_id, u.nickname, u.level_name ORDER BY emoji_count DESC LIMIT 3"
    \`\`\`
    (\`<전월1일>\`, \`<당월1일>\`은 \`YYYY-MM-DD\` 형식 실제 날짜로 치환)
+
+**위 SQL은 날짜만 치환하고 나머지(특히 \`NOT IN\` 제외 목록)는 한 글자도 바꾸지 말 것.** 제외 대상이 결과에 보이면 쿼리를 잘못 고친 것이다.
 
 ## 송신 방법
 
@@ -243,11 +245,11 @@ bash /home/node/.claude/skills/post-discord/post-discord.sh ${NOTICE_CHANNEL} <<
 # <a:zbutterfly_pink:1371314035194335295> {PREV_MONTH}월 랭킹 발표 <a:zbutterfly_pink:1371314035194335295>
 
 ### 공부시간
-1. <@user_id> (레벨마법사) - XXh XXm
+1. <@user_id> (<level_name>) - <study_time>
 ...
 
 ### 이모지 반응
-1. <@user_id> (레벨마법사) - XX개
+1. <@user_id> (<level_name>) - <emoji_count>개
 ...
 
 ||@everyone ||
@@ -270,8 +272,8 @@ EOM
 ## 양식 규칙
 
 - **제목 \`{PREV_MONTH}\`는 반드시 실제 숫자로 치환** (예: \`# ... 4월 랭킹 발표 ...\`). \`{PREV_MONTH}\` 라는 글자를 그대로 두지 말 것
-- 레벨 매핑: 1=마법학도, 2=견습마법사, 3=수습마법사, 4=초급마법사, 5=숙련마법사, 6=중급마법사, 7=정예마법사, 8=대마법사, 9=현자, 10+=현자
-- 시간 변환: hours → \`XXh XXm\` (예: 93.9시간 → \`93h 54m\`, 311.6시간 → \`311h 36m\`)
+- 레벨: 쿼리 결과의 \`level_name\` 값을 **그대로** 쓴다 (예: 대마법사, 현자). 레벨 숫자를 직접 이름으로 바꾸거나, 이전 대화/기억의 매핑표를 쓰지 말 것
+- 공부시간: 쿼리 결과의 \`study_time\` 값(\`XXh XXm\`)을 **그대로** 쓴다. 직접 다시 계산하지 말 것
 - 멘션은 \`<@user_id>\` 형식으로 (닉네임 아닌 실제 Discord user_id)
 - TOP10/TOP3 모두 1위부터 순서대로
 
@@ -407,6 +409,8 @@ const TASKS = [
     id: 'migrated-monthly-ranking',
     schedule_value: '0 9 1 * *',       // 매월 1일 09:00 KST
     prompt: monthlyRankingPrompt,
+    // 이전 대화의 옛 레벨 매핑이 섞이지 않도록 매번 새 세션으로 실행
+    context_mode: 'isolated',
   },
 ];
 
@@ -461,7 +465,7 @@ const tx = db.transaction(() => {
       null,
       'cron',
       t.schedule_value,
-      'group',
+      t.context_mode ?? 'group',
       nr,
       'active',
       now,
