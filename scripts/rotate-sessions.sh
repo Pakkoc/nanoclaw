@@ -7,11 +7,11 @@
 # 다음 컨테이너 spawn 때 새 세션이 시작되도록 한다.
 #
 # 기본 스케줄: 매일 새벽 3시 crontab
-#   0 3 * * * ~/nanoclaw/scripts/rotate-sessions.sh >> ~/nanoclaw/logs/rotate-sessions.log 2>&1
+#   0 3 * * * ~/discord-bot/nanoclaw/scripts/rotate-sessions.sh >> ~/discord-bot/nanoclaw/logs/rotate-sessions.log 2>&1
 
 set -u
 
-BASE="${NANOCLAW_ROOT:-$HOME/nanoclaw}/data/sessions"
+BASE="${NANOCLAW_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}/data/sessions"
 ARCHIVE="$BASE/_archive"
 THRESHOLD_MB="${ROTATE_THRESHOLD_MB:-2}"
 AGE_DAYS="${ROTATE_AGE_DAYS:-3}"

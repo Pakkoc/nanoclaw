@@ -9,7 +9,9 @@ Personal Claude assistant. See [README.md](README.md) for philosophy and setup. 
 ### 배포 타겟
 
 - **호스트**: `ssh s980903@192.168.0.102` (Ubuntu 24.04, SSH 키 인증 설정됨)
-- **리포 경로**: `~/nanoclaw` (미니 PC), `C:\dev\magicschool_discord\nanoclaw` (Windows)
+- **리포 경로**: `~/discord-bot/nanoclaw` (미니 PC), `C:\dev\magicschool_discord\nanoclaw` (Windows)
+  - 2026-10-06 `~/nanoclaw`에서 이동 (마법사관학교 봇들과 한 폴더로 정리). 구 경로 `~/nanoclaw`는 호환용 심볼릭 링크로 남아 있다
+  - 컨테이너 소유권 라벨 `nanoclaw.instance`는 설치 경로(`process.cwd()`)이므로 **다시 이동할 때는 반드시 서비스 중지 + nanoclaw 컨테이너 0개 상태에서** 옮길 것 (아래 "컨테이너 소유권 규칙" 참조)
 - **Node**: 미니 PC는 **nvm Node 22** 전용 사용. `nvm alias default 22` 금지 (다른 PM2 봇들이 시스템 Node 18에 의존)
 - **서비스**: `systemctl --user {start,stop,restart,status} nanoclaw` (systemd user, linger enabled)
 - **컨테이너 런타임**: Docker 29.x (user가 docker 그룹 멤버, sudo 불필요)
@@ -83,7 +85,7 @@ curl -s -o /dev/null -w "HTTP %{http_code}\n" --proxy "$PROXY" --cacert "$SP/ca.
 
 ### 외부 의존 서비스 (NanoClaw 바깥)
 
-- **`gaegul-dashboard`** (PM2) — 현재는 `~/nanoclaw/dashboard/server.js`를 실행한다 (구 `~/openclaw/workspace/dashboard` 경로 아님). 모니터링 대시보드 + 09:30 node-cron 업무일지 이메일 발송 (Gmail SMTP → `REPORT_RECIPIENT`). 업무일지는 `~/nanoclaw/groups/discord_main/daily-memories/`에서 직접 읽으므로 구버전의 "경로 연결 필요" 문제는 해소됨. docker ps 조회는 표시 전용 (stop/kill 없음)
+- **`gaegul-dashboard`** (PM2) — 현재는 `~/discord-bot/nanoclaw/dashboard/server.js`를 실행한다 (구 `~/openclaw/workspace/dashboard` 경로 아님). 모니터링 대시보드 + 09:30 node-cron 업무일지 이메일 발송 (Gmail SMTP → `REPORT_RECIPIENT`). 업무일지는 `~/discord-bot/nanoclaw/groups/discord_main/daily-memories/`에서 직접 읽으므로 구버전의 "경로 연결 필요" 문제는 해소됨. docker ps 조회는 표시 전용 (stop/kill 없음)
 - **다른 PM2 봇 8개** (`01-team-finder`, `02-fox-coin`, `03_bot`, `04-킬내기모집`, `05-쌀알봇`, `discord-bot`, `lavalink`, `music-bot`) — 시스템 Node 18에 의존. **절대 건드리지 말 것**. Node 기본 버전 변경 금지 (`crypto-arb`, `ngrok-arb`는 PM2에서 제거됨)
 - **구 OpenClaw 설치**: `~/.openclaw`, `~/openclaw` 모두 삭제 완료 (2026-06 확인)
 
@@ -96,7 +98,7 @@ curl -s -o /dev/null -w "HTTP %{http_code}\n" --proxy "$PROXY" --cacert "$SP/ca.
 ```
 Windows 편집 → git add → git commit → git push origin main
   ↓
-ssh s980903@192.168.0.102 "cd ~/nanoclaw && git pull && npm run build"
+ssh s980903@192.168.0.102 "cd ~/discord-bot/nanoclaw && git pull && npm run build"
   ↓
 필요시: ./container/build.sh  (Dockerfile 또는 container/skills 변경 시)
   ↓
@@ -123,16 +125,16 @@ systemctl --user restart nanoclaw
 
 ```bash
 # 서비스 상태 + 최근 로그
-ssh s980903@192.168.0.102 "systemctl --user status nanoclaw --no-pager && tail -50 ~/nanoclaw/logs/nanoclaw.log"
+ssh s980903@192.168.0.102 "systemctl --user status nanoclaw --no-pager && tail -50 ~/discord-bot/nanoclaw/logs/nanoclaw.log"
 
 # 에러만
-ssh s980903@192.168.0.102 "tail -50 ~/nanoclaw/logs/nanoclaw.error.log"
+ssh s980903@192.168.0.102 "tail -50 ~/discord-bot/nanoclaw/logs/nanoclaw.error.log"
 
 # 실행 중인 컨테이너
 ssh s980903@192.168.0.102 "docker ps | grep nanoclaw"
 
 # DB에서 등록된 그룹/태스크
-ssh s980903@192.168.0.102 "cd ~/nanoclaw && node -e 'const db=require(\"better-sqlite3\")(\"store/messages.db\");console.log(db.prepare(\"SELECT jid,folder,requires_trigger,is_main FROM registered_groups\").all());db.close();'"
+ssh s980903@192.168.0.102 "cd ~/discord-bot/nanoclaw && node -e 'const db=require(\"better-sqlite3\")(\"store/messages.db\");console.log(db.prepare(\"SELECT jid,folder,requires_trigger,is_main FROM registered_groups\").all());db.close();'"
 ```
 
 로컬 Read/Edit/Write 도구는 Windows 파일만 볼 수 있으므로 미니 PC 파일은 `ssh cat` 또는 `scp`로 가져와야 한다.

@@ -17,7 +17,7 @@
 set -u
 NODE22_BIN=/home/s980903/.nvm/versions/node/v22.22.2/bin
 NODE="$NODE22_BIN/node"
-PROJECT=/home/s980903/nanoclaw
+PROJECT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT" || exit 0
 
 if "$NODE" -e "require('better-sqlite3')" >/dev/null 2>&1; then

@@ -20,7 +20,7 @@ const PORT = 18790;
 const HOME = process.env.HOME || require('os').homedir();
 
 // ===== 경로 (NanoClaw) =====
-const NANOCLAW_ROOT = process.env.NANOCLAW_ROOT || path.resolve(HOME, 'nanoclaw');
+const NANOCLAW_ROOT = process.env.NANOCLAW_ROOT || path.resolve(__dirname, '..');
 const GROUPS_DIR = path.join(NANOCLAW_ROOT, 'groups');
 const MAIN_GROUP_DIR = path.join(GROUPS_DIR, 'discord_main');
 const MEMORY_DIR = path.join(MAIN_GROUP_DIR, 'daily-memories');
