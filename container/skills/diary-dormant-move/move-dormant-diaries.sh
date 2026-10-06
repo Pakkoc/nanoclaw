@@ -27,7 +27,7 @@ while [[ $# -gt 0 ]]; do
     *)          shift ;;
   esac
 done
-export DORMANT_MONTHS="${DORMANT_MONTHS:-6}"
+export DORMANT_MONTHS="${DORMANT_MONTHS:-3}"
 export DORMANT_TARGET_CAT="${DORMANT_TARGET_CAT:-}"
 
 python3 << PYEOF
@@ -57,7 +57,7 @@ DORMANT_CATEGORIES = [
 ]
 
 # 비활성 기준 개월 수 (기본 6개월, --months 인자 또는 DORMANT_MONTHS 환경변수로 오버라이드)
-MONTHS = int(os.environ.get("DORMANT_MONTHS", "6"))
+MONTHS = int(os.environ.get("DORMANT_MONTHS", "3"))
 MONTHS_MS = MONTHS * 30 * 24 * 60 * 60 * 1000
 now_ms = int(time.time() * 1000)
 cutoff_ms = now_ms - MONTHS_MS
