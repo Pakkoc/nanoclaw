@@ -444,6 +444,17 @@ for ch in channels:
             print(f\"{ch['id']} {status} {ch.get('name','')}\")
             sys.exit(0)
 
+# 1b. 이름 기반 보조 검색 (overwrite 누락/지연 대비)
+nick = '$CHANNEL_NAME'
+for ch in channels:
+    pid = str(ch.get('parent_id', ''))
+    if pid not in active_cats:
+        continue
+    if ch.get('name', '').lower() == nick.lower():
+        status = 'same' if pid == target_cat else 'move'
+        print(f\"{ch['id']} {status} {ch.get('name','')}\")
+        sys.exit(0)
+
 # 2. 휴면 카테고리에서 채널 이름으로 검색
 # (휴면 이동 시 user overwrite가 제거되므로 이름 기반 매칭)
 nick = '$CHANNEL_NAME'
