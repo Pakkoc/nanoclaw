@@ -445,15 +445,20 @@ for ch in channels:
             sys.exit(0)
 
 # 1b. 이름 기반 보조 검색 (overwrite 누락/지연 대비)
+# 동명이인 방지: 이름 일치 채널에 type=1 overwrite가 있는데 id가 다르면 건너뜀
 nick = '$CHANNEL_NAME'
 for ch in channels:
     pid = str(ch.get('parent_id', ''))
     if pid not in active_cats:
         continue
-    if ch.get('name', '').lower() == nick.lower():
-        status = 'same' if pid == target_cat else 'move'
-        print(f\"{ch['id']} {status} {ch.get('name','')}\")
-        sys.exit(0)
+    if ch.get('name', '').lower() != nick.lower():
+        continue
+    user_overwrites = [ow for ow in ch.get('permission_overwrites', []) if ow.get('type') == 1]
+    if user_overwrites and not any(str(ow.get('id')) == user_id for ow in user_overwrites):
+        continue  # 다른 사람 채널 (동명이인)
+    status = 'same' if pid == target_cat else 'move'
+    print(f\"{ch['id']} {status} {ch.get('name','')}\")
+    sys.exit(0)
 
 # 2. 휴면 카테고리에서 채널 이름으로 검색
 # (휴면 이동 시 user overwrite가 제거되므로 이름 기반 매칭)
