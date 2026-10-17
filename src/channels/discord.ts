@@ -194,7 +194,8 @@ export class DiscordChannel implements Channel {
           (att) => {
             const contentType = att.contentType || '';
             if (contentType.startsWith('image/')) {
-              return `[Image: ${att.name || 'image'}]`;
+              // Include URL so agent-runner can fetch and pass to vision model
+              return `[Image: ${att.name || 'image'}](${att.url})`;
             } else if (contentType.startsWith('video/')) {
               return `[Video: ${att.name || 'video'}]`;
             } else if (contentType.startsWith('audio/')) {

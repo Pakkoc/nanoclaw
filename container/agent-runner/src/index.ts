@@ -53,9 +53,22 @@ interface SessionsIndex {
   entries: SessionEntry[];
 }
 
+type ImageContentBlock = {
+  type: 'image';
+  source: { type: 'base64'; media_type: string; data: string };
+};
+
+type TextContentBlock = {
+  type: 'text';
+  text: string;
+};
+
+type ContentBlock = TextContentBlock | ImageContentBlock;
+
 interface SDKUserMessage {
   type: 'user';
-  message: { role: 'user'; content: string };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  message: { role: 'user'; content: string | ContentBlock[] | any };
   parent_tool_use_id: null;
   session_id: string;
 }
@@ -77,6 +90,16 @@ class MessageStream {
     this.queue.push({
       type: 'user',
       message: { role: 'user', content: text },
+      parent_tool_use_id: null,
+      session_id: '',
+    });
+    this.waiting?.();
+  }
+
+  pushContent(content: string | ContentBlock[]): void {
+    this.queue.push({
+      type: 'user',
+      message: { role: 'user', content },
       parent_tool_use_id: null,
       session_id: '',
     });
@@ -370,6 +393,54 @@ function waitForIpcMessage(): Promise<string | null> {
 }
 
 /**
+/**
+ * Parse image links in the format [Image: name](url) from a prompt string.
+ * Returns content blocks (text + images) if any images are found, else null.
+ */
+const IMAGE_LINK_RE = /\[Image: ([^\]]+)\]\((https?:\/\/[^\)]+)\)/g;
+
+async function buildImageContentBlocks(
+  text: string,
+): Promise<ContentBlock[] | null> {
+  const matches = [...text.matchAll(IMAGE_LINK_RE)];
+  if (matches.length === 0) return null;
+
+  const blocks: ContentBlock[] = [];
+  let lastIndex = 0;
+
+  for (const match of matches) {
+    const [fullMatch, name, imageUrl] = match;
+    const matchStart = match.index ?? 0;
+
+    // Text before this image
+    const before = text.slice(lastIndex, matchStart).trim();
+    if (before) blocks.push({ type: 'text', text: before });
+
+    try {
+      const res = await fetch(imageUrl);
+      const mediaType =
+        res.headers.get('content-type')?.split(';')[0] ?? 'image/jpeg';
+      const buf = await res.arrayBuffer();
+      const data = Buffer.from(buf).toString('base64');
+      blocks.push({ type: 'image', source: { type: 'base64', media_type: mediaType, data } });
+      log(`Fetched image "${name}" (${mediaType}, ${data.length} b64 chars)`);
+    } catch (err) {
+      log(`Failed to fetch image "${name}": ${err}`);
+      // Fallback: keep as text
+      blocks.push({ type: 'text', text: `[Image: ${name}]` });
+    }
+
+    lastIndex = matchStart + fullMatch.length;
+  }
+
+  // Remaining text
+  const remaining = text.slice(lastIndex).trim();
+  if (remaining) blocks.push({ type: 'text', text: remaining });
+
+  return blocks;
+}
+
+/**
  * Run a single query and stream results via writeOutput.
  * Uses MessageStream (AsyncIterable) to keep isSingleUserTurn=false,
  * allowing agent teams subagents to run to completion.
@@ -388,7 +459,14 @@ async function runQuery(
   closedDuringQuery: boolean;
 }> {
   const stream = new MessageStream();
-  stream.push(prompt);
+
+  // If prompt contains image links, convert to vision content blocks
+  const imageBlocks = await buildImageContentBlocks(prompt);
+  if (imageBlocks) {
+    stream.pushContent(imageBlocks);
+  } else {
+    stream.push(prompt);
+  }
 
   // Poll IPC for follow-up messages and _close sentinel during the query
   let ipcPolling = true;
