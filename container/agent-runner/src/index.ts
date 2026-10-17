@@ -393,11 +393,19 @@ function waitForIpcMessage(): Promise<string | null> {
 }
 
 /**
-/**
  * Parse image links in the format [Image: name](url) from a prompt string.
  * Returns content blocks (text + images) if any images are found, else null.
  */
 const IMAGE_LINK_RE = /\[Image: ([^\]]+)\]\((https?:\/\/[^\)]+)\)/g;
+
+// Anthropic API limits: these media types only, 5MB per base64-encoded image.
+const SUPPORTED_IMAGE_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+]);
+const MAX_IMAGE_BYTES = Math.floor((5 * 1024 * 1024 * 3) / 4);
 
 async function buildImageContentBlocks(
   text: string,
@@ -409,7 +417,10 @@ async function buildImageContentBlocks(
   let lastIndex = 0;
 
   for (const match of matches) {
-    const [fullMatch, name, imageUrl] = match;
+    const [fullMatch, name] = match;
+    // The host XML-escapes message content (router.ts escapeXml), which turns
+    // the CDN's signed query string "&is=..&hm=.." into "&amp;is=.." → 404.
+    const imageUrl = match[2].replace(/&amp;/g, '&');
     const matchStart = match.index ?? 0;
 
     // Text before this image
@@ -418,16 +429,31 @@ async function buildImageContentBlocks(
 
     try {
       const res = await fetch(imageUrl);
-      const mediaType =
-        res.headers.get('content-type')?.split(';')[0] ?? 'image/jpeg';
-      const buf = await res.arrayBuffer();
-      const data = Buffer.from(buf).toString('base64');
-      blocks.push({ type: 'image', source: { type: 'base64', media_type: mediaType, data } });
-      log(`Fetched image "${name}" (${mediaType}, ${data.length} b64 chars)`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const mediaType = (res.headers.get('content-type') ?? '')
+        .split(';')[0]
+        .trim()
+        .toLowerCase();
+      if (!SUPPORTED_IMAGE_TYPES.has(mediaType)) {
+        throw new Error(`unsupported media type "${mediaType}"`);
+      }
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (buf.length > MAX_IMAGE_BYTES) {
+        throw new Error(`too large (${buf.length} bytes)`);
+      }
+      blocks.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: mediaType,
+          data: buf.toString('base64'),
+        },
+      });
+      log(`Fetched image "${name}" (${mediaType}, ${buf.length} bytes)`);
     } catch (err) {
       log(`Failed to fetch image "${name}": ${err}`);
-      // Fallback: keep as text
-      blocks.push({ type: 'text', text: `[Image: ${name}]` });
+      // Fallback: keep the link so the agent can still try it with its tools
+      blocks.push({ type: 'text', text: fullMatch });
     }
 
     lastIndex = matchStart + fullMatch.length;
@@ -438,6 +464,19 @@ async function buildImageContentBlocks(
   if (remaining) blocks.push({ type: 'text', text: remaining });
 
   return blocks;
+}
+
+/** Push a user message, converting image links to vision content blocks. */
+async function pushWithImages(
+  stream: MessageStream,
+  text: string,
+): Promise<void> {
+  const imageBlocks = await buildImageContentBlocks(text);
+  if (imageBlocks) {
+    stream.pushContent(imageBlocks);
+  } else {
+    stream.push(text);
+  }
 }
 
 /**
@@ -461,17 +500,12 @@ async function runQuery(
   const stream = new MessageStream();
 
   // If prompt contains image links, convert to vision content blocks
-  const imageBlocks = await buildImageContentBlocks(prompt);
-  if (imageBlocks) {
-    stream.pushContent(imageBlocks);
-  } else {
-    stream.push(prompt);
-  }
+  await pushWithImages(stream, prompt);
 
   // Poll IPC for follow-up messages and _close sentinel during the query
   let ipcPolling = true;
   let closedDuringQuery = false;
-  const pollIpcDuringQuery = () => {
+  const pollIpcDuringQuery = async () => {
     if (!ipcPolling) return;
     if (shouldClose()) {
       log('Close sentinel detected during query, ending stream');
@@ -483,7 +517,8 @@ async function runQuery(
     const messages = drainIpcInput();
     for (const text of messages) {
       log(`Piping IPC message into active query (${text.length} chars)`);
-      stream.push(text);
+      // Awaited in order so follow-up messages keep their sequence
+      await pushWithImages(stream, text);
     }
     setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
   };
