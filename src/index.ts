@@ -1007,7 +1007,8 @@ async function startMessageLoop(): Promise<void> {
 }
 
 /**
- * Startup recovery: log unprocessed messages but do NOT enqueue them.
+ * Startup recovery: log unprocessed messages but do NOT enqueue them
+ * (except for the main group — see below).
  *
  * Why: cursor > lastBotReply is the normal post-response state — we
  * advance the cursor when the agent finishes, but lastBotReply only
@@ -1017,6 +1018,12 @@ async function startMessageLoop(): Promise<void> {
  * starving the main channel behind low-priority traffic. The message
  * loop's polling will pick up any genuine pending messages within one
  * POLL_INTERVAL tick.
+ *
+ * Exception: the main group IS enqueued. The message loop only reacts to
+ * messages newer than the global lastTimestamp, so pending main-channel
+ * messages (e.g. requests piped to a container that was killed by a
+ * self-deploy restart) would otherwise sit unanswered until someone posts
+ * again. It is a single container, so there is no thundering herd.
  */
 function recoverPendingMessages(): void {
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
@@ -1027,6 +1034,14 @@ function recoverPendingMessages(): void {
       MAX_MESSAGES_PER_PROMPT,
     );
     if (pending.length > 0) {
+      if (group.isMain) {
+        logger.info(
+          { group: group.name, pendingCount: pending.length },
+          'Recovery: found unprocessed main-group messages — enqueuing',
+        );
+        queue.enqueueMessageCheck(chatJid);
+        continue;
+      }
       logger.info(
         { group: group.name, pendingCount: pending.length },
         'Recovery: found unprocessed messages — letting message loop pick them up',
