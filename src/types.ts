@@ -31,6 +31,8 @@ export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
   noDailyLimit?: boolean; // If true, bypass the diary daily response limit
+  model?: string; // Override the Claude model, e.g. 'claude-opus-4-5'
+  effort?: 'low' | 'medium' | 'high' | 'max'; // Reasoning effort level
 }
 
 export interface RegisteredGroup {

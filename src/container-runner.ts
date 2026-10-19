@@ -44,6 +44,8 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  model?: string; // Override Claude model for this group
+  effort?: 'low' | 'medium' | 'high' | 'max'; // Reasoning effort level
 }
 
 export interface ContainerOutput {

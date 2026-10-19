@@ -33,6 +33,8 @@ interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  model?: string;
+  effort?: 'low' | 'medium' | 'high' | 'max';
 }
 
 interface ContainerOutput {
@@ -565,6 +567,8 @@ async function runQuery(
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
+      ...(containerInput.model ? { model: containerInput.model } : {}),
+      ...(containerInput.effort ? { effort: containerInput.effort } : {}),
       systemPrompt: systemAppend
         ? {
             type: 'preset' as const,
