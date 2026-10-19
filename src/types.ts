@@ -33,6 +33,8 @@ export interface ContainerConfig {
   noDailyLimit?: boolean; // If true, bypass the diary daily response limit
   model?: string; // Override the Claude model, e.g. 'claude-opus-4-5'
   effort?: 'low' | 'medium' | 'high' | 'max'; // Reasoning effort level
+  threadSessions?: boolean; // Each top-level post opens a Discord thread; the conversation (and Claude session) lives in that thread
+  sessionPerJid?: boolean; // Key the Claude session by JID instead of folder (threads of a threadSessions channel)
 }
 
 export interface RegisteredGroup {

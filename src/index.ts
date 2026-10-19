@@ -375,6 +375,17 @@ function deregisterGroup(jid: string): void {
   // Drop per-jid queue/runtime state (bounded growth for ephemeral channels).
   queue.forget(jid);
 
+  // Per-thread session (sessionPerJid) belongs to this jid alone.
+  if (group.containerConfig?.sessionPerJid) {
+    const key = sessionKey(group, jid);
+    try {
+      deleteSession(key);
+    } catch {
+      // best-effort — session may already be gone
+    }
+    delete sessions[key];
+  }
+
   // jid-scoped IPC namespace — always safe to remove.
   try {
     fs.rmSync(resolveGroupIpcPath(jid), { recursive: true, force: true });
@@ -657,6 +668,17 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   return true;
 }
 
+/**
+ * Key under which a group's Claude session is stored. Normally the folder
+ * (all JIDs of a folder share one session); threads of a threadSessions
+ * channel get one session per thread.
+ */
+function sessionKey(group: RegisteredGroup, chatJid: string): string {
+  return group.containerConfig?.sessionPerJid
+    ? `${group.folder}@${chatJid}`
+    : group.folder;
+}
+
 async function runAgent(
   group: RegisteredGroup,
   prompt: string,
@@ -664,7 +686,8 @@ async function runAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
-  const sessionId = sessions[group.folder];
+  const sessKey = sessionKey(group, chatJid);
+  const sessionId = sessions[sessKey];
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
@@ -696,8 +719,8 @@ async function runAgent(
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
-          sessions[group.folder] = output.newSessionId;
-          setSession(group.folder, output.newSessionId);
+          sessions[sessKey] = output.newSessionId;
+          setSession(sessKey, output.newSessionId);
         }
         await onOutput(output);
       }
@@ -722,8 +745,8 @@ async function runAgent(
     );
 
     if (output.newSessionId) {
-      sessions[group.folder] = output.newSessionId;
-      setSession(group.folder, output.newSessionId);
+      sessions[sessKey] = output.newSessionId;
+      setSession(sessKey, output.newSessionId);
     }
 
     if (output.status === 'error') {
@@ -743,8 +766,8 @@ async function runAgent(
           { group: group.name, staleSessionId: sessionId, error: output.error },
           'Stale session detected — clearing for next retry',
         );
-        delete sessions[group.folder];
-        deleteSession(group.folder);
+        delete sessions[sessKey];
+        deleteSession(sessKey);
       }
 
       logger.error(

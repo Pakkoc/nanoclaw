@@ -5,7 +5,9 @@ import {
   Events,
   GatewayIntentBits,
   Message,
+  MessageType,
   TextChannel,
+  ThreadAutoArchiveDuration,
   ThreadChannel,
 } from 'discord.js';
 
@@ -155,9 +157,56 @@ export class DiscordChannel implements Channel {
       const sender = message.author.id;
       const msgId = message.id;
 
+      // Thread-session channels (containerConfig.threadSessions): every
+      // top-level post opens its own Discord thread, and the conversation —
+      // with its own Claude session — continues only inside that thread.
+      // If thread creation fails we fall through and handle the message in
+      // the channel as before.
+      let sessionThread: ThreadChannel | null = null;
+      if (message.guild && !message.author.bot) {
+        if (isThread) {
+          const thread = message.channel as ThreadChannel;
+          const parentGroup =
+            this.opts.registeredGroups()[`dc:${thread.parentId}`];
+          if (parentGroup?.containerConfig?.threadSessions) {
+            this.ensureThreadSessionGroup(realJid, thread.name, parentGroup);
+          }
+        } else {
+          const parentGroup = this.opts.registeredGroups()[realJid];
+          const isUserPost =
+            message.type === MessageType.Default ||
+            message.type === MessageType.Reply;
+          if (parentGroup?.containerConfig?.threadSessions && isUserPost) {
+            try {
+              sessionThread = await message.startThread({
+                name: threadNameFor(message, senderName),
+                autoArchiveDuration: ThreadAutoArchiveDuration.OneWeek,
+              });
+              chatJid = `dc:${sessionThread.id}`;
+              this.ensureThreadSessionGroup(
+                chatJid,
+                sessionThread.name,
+                parentGroup,
+              );
+              logger.info(
+                { parentJid: realJid, threadJid: chatJid },
+                'Opened session thread for channel post',
+              );
+            } catch (err) {
+              logger.warn(
+                { chatJid: realJid, err },
+                'Session thread creation failed — handling in channel',
+              );
+            }
+          }
+        }
+      }
+
       // Determine chat name
       let chatName: string;
-      if (message.guild) {
+      if (sessionThread) {
+        chatName = `${message.guild!.name} #${sessionThread.name}`;
+      } else if (message.guild) {
         const textChannel = message.channel as TextChannel;
         chatName = `${message.guild.name} #${textChannel.name}`;
       } else {
@@ -484,13 +533,38 @@ export class DiscordChannel implements Channel {
     return true;
   }
 
+  /**
+   * Register a thread of a threadSessions channel as its own group: same
+   * folder and permissions as the parent (shared CLAUDE.md, memories, files),
+   * but a Claude session of its own (sessionPerJid). No-op if registered.
+   */
+  private ensureThreadSessionGroup(
+    jid: string,
+    threadName: string,
+    parent: RegisteredGroup,
+  ): void {
+    if (this.opts.registeredGroups()[jid]) return;
+    const { threadSessions: _parentOnly, ...inherited } =
+      parent.containerConfig ?? {};
+    this.opts.registerGroup(jid, {
+      name: `${parent.name} 🧵${threadName}`,
+      folder: parent.folder,
+      trigger: parent.trigger,
+      added_at: new Date().toISOString(),
+      requiresTrigger: false,
+      isMain: parent.isMain,
+      containerConfig: { ...inherited, sessionPerJid: true },
+    });
+  }
+
   private handleChannelDeleted(channelId: string): void {
     const jid = `dc:${channelId}`;
     const group = this.opts.registeredGroups()[jid];
     if (!group) return;
     const isLifecycleGroup =
       group.folder.startsWith('discord_tickets_ch') ||
-      group.folder.startsWith('diaries/');
+      group.folder.startsWith('diaries/') ||
+      group.containerConfig?.sessionPerJid === true;
     if (!isLifecycleGroup) return;
 
     this.opts.deregisterGroup(jid);
@@ -580,6 +654,13 @@ export class DiscordChannel implements Channel {
       'Diary category walk complete',
     );
   }
+}
+
+/** Thread title from the post's first line (Discord caps names at 100). */
+function threadNameFor(message: Message, senderName: string): string {
+  const firstLine = message.cleanContent.split('\n')[0].trim();
+  const name = firstLine || `${senderName}님 요청`;
+  return name.length > 90 ? `${name.slice(0, 90)}…` : name;
 }
 
 registerChannel('discord', (opts: ChannelOpts) => {
