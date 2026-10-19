@@ -30,6 +30,7 @@ export interface AllowedRoot {
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  noDailyLimit?: boolean; // If true, bypass the diary daily response limit
 }
 
 export interface RegisteredGroup {

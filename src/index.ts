@@ -493,7 +493,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // Hard daily response limit for diary channels — enforced at host level so
   // parallel containers cannot race past it.  GroupQueue serialises calls per
   // JID, so the count read here is always up-to-date.
-  if (group.folder.startsWith(DIARY_FOLDER_PREFIX)) {
+  // Channels with containerConfig.noDailyLimit=true bypass this check.
+  if (
+    group.folder.startsWith(DIARY_FOLDER_PREFIX) &&
+    !group.containerConfig?.noDailyLimit
+  ) {
     const todayCount = countTodayBotResponses(
       group.folder,
       ASSISTANT_NAME,
@@ -923,7 +927,11 @@ async function startMessageLoop(): Promise<void> {
           // Hard daily limit check for diary channels — same guard as in
           // processGroupMessages, but applied here for the piping path
           // (active container already running).
-          if (group.folder.startsWith(DIARY_FOLDER_PREFIX)) {
+          // Channels with containerConfig.noDailyLimit=true bypass this check.
+          if (
+            group.folder.startsWith(DIARY_FOLDER_PREFIX) &&
+            !group.containerConfig?.noDailyLimit
+          ) {
             const todayCount = countTodayBotResponses(
               group.folder,
               ASSISTANT_NAME,
