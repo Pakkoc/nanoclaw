@@ -92,6 +92,9 @@ export class DiscordChannel implements Channel {
       // 메시지를 보내는데, 이걸 DB에 남겨야 업무일지 크론이 집계 가능.
       const myBotId = this.client?.user?.id;
       if (message.author.bot && message.author.id !== myBotId) return;
+      // startThread()가 스레드 안에 남기는 빈 시스템 메시지. 봇 작성으로 저장되면
+      // 커서 복구가 이를 "마지막 봇 답장"으로 보고 원 게시글을 건너뛴다.
+      if (message.type === MessageType.ThreadStarterMessage) return;
 
       const channelId = message.channelId;
       const realJid = `dc:${channelId}`;
