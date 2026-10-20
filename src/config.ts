@@ -58,6 +58,10 @@ export const MAX_MESSAGES_PER_PROMPT = Math.max(
 );
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep container alive after last result
+// Diary groups (diaries/*) without their own containerConfig.model/effort.
+// Pinned so old and new sessions run the same model.
+export const DIARY_MODEL = 'claude-sonnet-5-5';
+export const DIARY_EFFORT = 'medium' as const;
 export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,
   parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,

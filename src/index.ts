@@ -8,6 +8,8 @@ import {
   ASSISTANT_NAME,
   DATA_DIR,
   DEFAULT_TRIGGER,
+  DIARY_EFFORT,
+  DIARY_MODEL,
   getTriggerPattern,
   GROUPS_DIR,
   IDLE_TIMEOUT,
@@ -726,6 +728,7 @@ async function runAgent(
       }
     : undefined;
 
+  const isDiaryFolder = group.folder.startsWith('diaries/');
   try {
     const output = await runContainerAgent(
       group,
@@ -736,8 +739,12 @@ async function runAgent(
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
-        model: group.containerConfig?.model,
-        effort: group.containerConfig?.effort,
+        model:
+          group.containerConfig?.model ??
+          (isDiaryFolder ? DIARY_MODEL : undefined),
+        effort:
+          group.containerConfig?.effort ??
+          (isDiaryFolder ? DIARY_EFFORT : undefined),
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
