@@ -82,6 +82,7 @@ curl -s -o /dev/null -w "HTTP %{http_code}\n" --proxy "$PROXY" --cacert "$SP/ca.
 - `migrated-heartbeat-memory-cleanup` — cron `0 3 * * *` — 매일 새벽 3시 memory-cleanup 실행
 - `task-diary-dormant-move` — cron `0 6 * * *` — 매일 6시 다이어리 휴면 이동
 - `task-1781072591793-q47f3v` — cron `0 6 * * *` — 매일 6시 직군 역할-닉네임 태그 동기화. `groups/global/nickname-sync.sh`(컨테이너 경로 `/workspace/global/nickname-sync.sh`)를 실행하며, 이 파일은 gitignore 대상이므로 새 머신 clone 시 `scripts/nickname-sync.sh`(git 추적본)를 `groups/global/`로 복사해야 한다. 원래 2026-06-10 등록 시도가 IPC 인가 버그로 무음 차단됐다가 2026-06-11 재등록됨
+- `task-guide-learning` — cron `0 10 * * *` — 매일 10시 서버 안내서 학습. `scripts/guide-learning/extract-staff-replies.py`로 지난 실행 이후 티켓 운영진 답변을 뽑아 안내서(`groups/global/server-guide.md`, gitignore)에 없는 규칙을 후보로 업무채널 스레드에 올린다. 승인 절차는 `groups/discord_main/CLAUDE.md` "📚 서버 안내서 관리". 상태 파일은 `groups/discord_main/guide-learning/`
 
 ### 외부 의존 서비스 (NanoClaw 바깥)
 

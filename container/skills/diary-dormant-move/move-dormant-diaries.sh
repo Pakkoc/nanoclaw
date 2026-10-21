@@ -56,7 +56,7 @@ DORMANT_CATEGORIES = [
     "1522048332967575712",  # ~휴면 다이어리 5~
 ]
 
-# 비활성 기준 개월 수 (기본 6개월, --months 인자 또는 DORMANT_MONTHS 환경변수로 오버라이드)
+# 비활성 기준 개월 수 (기본 3개월, --months 인자 또는 DORMANT_MONTHS 환경변수로 오버라이드)
 MONTHS = int(os.environ.get("DORMANT_MONTHS", "3"))
 MONTHS_MS = MONTHS * 30 * 24 * 60 * 60 * 1000
 now_ms = int(time.time() * 1000)
@@ -290,7 +290,7 @@ for c in all_channels:
     if owner_id and owner_id not in members:
         reason = f"탈퇴 멤버 (user_id={owner_id})"
 
-    # 조건 1: 6개월 비활성 (스레드 포함)
+    # 조건 1: 기준 개월 수 비활성 (스레드 포함)
     if reason is None:
         last_msg_id = c.get("last_message_id")
         channel_latest_ms = snowflake_to_ms(last_msg_id) if last_msg_id else snowflake_to_ms(channel_id)
