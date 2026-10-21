@@ -73,6 +73,8 @@ curl -s -o /dev/null -w "HTTP %{http_code}\n" --proxy "$PROXY" --cacert "$SP/ca.
 - **`diary-create`** — Discord API로 사용자 기숙사에 다이어리 채널 생성 (권한/멘션/완료 메시지까지). `DISCORD_BOT_TOKEN` 동일 경로. `python3`가 Dockerfile에 포함됨
 - **`memory-cleanup`** — `/workspace/group/daily-memories/` 아래 7일 이상 된 세션 덤프(`YYYY-MM-DD-HHMM.md`) 삭제. 업무일지(`YYYY-MM-DD.md`)는 보존
 
+**비밀값·스킬 노출 범위** (`src/container-runner.ts`, 2026-10-21): 회원과 대화하는 non-main 컨테이너는 실제 `tools.env`를 보지 못한다. 티켓(`discord_tickets*`)은 `DISCORD_BOT_TOKEN`만 담긴 `data/secrets/tools-ticket.env`(컨테이너 시작 때마다 tools.env에서 다시 만듦)를, 다이어리 등 나머지는 빈 파일을 같은 경로에 받는다. 스킬도 허용 목록(`NON_MAIN_SKILLS`, `TICKET_SKILLS`)에 있는 것만 복사되며, 목록에 없는 새 스킬은 업무채널 전용이 된다. 티켓 스킬이 새 비밀값을 필요로 하면 `writeTicketToolsEnv`의 `keep` 목록에 추가할 것
+
 ### 등록된 스케줄 태스크 (`scheduled_tasks` 테이블, 미니 PC DB)
 
 모두 `group_folder=discord_main`, 타임존 Asia/Seoul:

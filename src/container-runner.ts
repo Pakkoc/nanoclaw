@@ -61,6 +61,35 @@ interface VolumeMount {
   readonly: boolean;
 }
 
+// Container skills a non-main group may receive. An allowlist, so a new
+// skill (often one that needs secrets or admin powers) stays main-only
+// until it is listed here.
+const NON_MAIN_SKILLS = ['agent-browser', 'slack-formatting'];
+const TICKET_SKILLS = [
+  ...NON_MAIN_SKILLS,
+  'post-discord',
+  'diary-create',
+  'diary-dormant-move', // create-diary.sh frees space in a full dorm category
+];
+
+function isTicketFolder(folder: string): boolean {
+  return folder === 'discord_tickets' || /^discord_tickets_ch\d+$/.test(folder);
+}
+
+/** Copy of tools.env with only the keys ticket skills need. Returns its path. */
+function writeTicketToolsEnv(globalDir: string): string {
+  const keep = ['DISCORD_BOT_TOKEN'];
+  const lines = fs
+    .readFileSync(path.join(globalDir, 'tools.env'), 'utf-8')
+    .split('\n')
+    .filter((line) => keep.some((key) => line.startsWith(`${key}=`)));
+  const dir = path.join(DATA_DIR, 'secrets');
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const file = path.join(dir, 'tools-ticket.env');
+  fs.writeFileSync(file, lines.join('\n') + '\n', { mode: 0o600 });
+  return file;
+}
+
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
@@ -79,8 +108,8 @@ function buildVolumeMounts(
     //
     // SECURITY: Non-main groups still don't see /workspace/project at all,
     // so this doesn't weaken ticket/other-group isolation. Main (사장님) has
-    // full access including tools.env; non-main groups get tools.env shadowed
-    // to /dev/null (see else branch below).
+    // full access including tools.env; non-main groups get a shadowed
+    // tools.env (see else branch below).
     //
     // Prompt-level enforcement of who/what is expected to edit what lives in
     // groups/discord_main/CLAUDE.md. OS-level is intentionally permissive for
@@ -128,9 +157,6 @@ function buildVolumeMounts(
     });
 
     // Global memory directory (read-only for non-main)
-    // 직원(non-main) 컨테이너도 자기 역할에 필요한 tools.env를 읽을 수
-    // 있어야 한다. 예: 티켓 그룹의 create-diary.sh는 DISCORD_BOT_TOKEN을
-    // tools.env에서 로드한다. 읽기 전용이므로 수정은 불가.
     const globalDir = path.join(GROUPS_DIR, 'global');
     if (fs.existsSync(globalDir)) {
       mounts.push({
@@ -138,6 +164,19 @@ function buildVolumeMounts(
         containerPath: '/workspace/global',
         readonly: true,
       });
+      // tools.env holds the DB URL, bot token, Gmail and dashboard passwords.
+      // Non-main containers talk to members, so they never see the real file:
+      // tickets get a copy with only DISCORD_BOT_TOKEN (create-diary.sh,
+      // post-discord.sh need it), everyone else gets an empty file.
+      if (fs.existsSync(path.join(globalDir, 'tools.env'))) {
+        mounts.push({
+          hostPath: isTicketFolder(group.folder)
+            ? writeTicketToolsEnv(globalDir)
+            : '/dev/null',
+          containerPath: '/workspace/global/tools.env',
+          readonly: true,
+        });
+      }
     }
   }
 
@@ -178,10 +217,20 @@ function buildVolumeMounts(
   const skillsSrc = path.join(process.cwd(), 'container', 'skills');
   const skillsDst = path.join(groupSessionsDir, 'skills');
   if (fs.existsSync(skillsSrc)) {
+    const allowed = isMain
+      ? null
+      : isTicketFolder(group.folder)
+        ? TICKET_SKILLS
+        : NON_MAIN_SKILLS;
     for (const skillDir of fs.readdirSync(skillsSrc)) {
       const srcDir = path.join(skillsSrc, skillDir);
       if (!fs.statSync(srcDir).isDirectory()) continue;
       const dstDir = path.join(skillsDst, skillDir);
+      if (allowed && !allowed.includes(skillDir)) {
+        // Remove copies synced before the allowlist existed.
+        fs.rmSync(dstDir, { recursive: true, force: true });
+        continue;
+      }
       fs.cpSync(srcDir, dstDir, { recursive: true });
     }
   }
