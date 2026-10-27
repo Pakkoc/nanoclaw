@@ -15,10 +15,12 @@ groups/*
 !groups/global/
 !groups/discord_main/
 !groups/discord_tickets/
+!groups/discord_helpdesk/
 groups/main/*
 groups/global/*
 groups/discord_main/*
 groups/discord_tickets/*
+groups/discord_helpdesk/*
 !groups/main/CLAUDE.md
 !groups/global/CLAUDE.md
 !groups/global/soul.md
@@ -26,6 +28,9 @@ groups/discord_tickets/*
 !groups/global/server-guide.md
 !groups/discord_main/CLAUDE.md
 !groups/discord_tickets/CLAUDE.md
+!groups/discord_helpdesk/CLAUDE.md
+!groups/discord_helpdesk/filter.json
+!groups/discord_helpdesk/review-log.md
 
 # Secrets — never commit operational credentials
 groups/global/tools.env

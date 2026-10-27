@@ -56,6 +56,7 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
+import { HELPDESK_FOLDER } from './channels/helpdesk.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
   restoreRemoteControl,
@@ -667,6 +668,33 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return false;
   }
 
+  // Helpdesk agents often decide to stay silent. Without a bot-message row
+  // newer than the cursor, getOrRecoverCursor would roll the cursor back and
+  // replay the question on the next delivery — so leave a marker.
+  // (Checked against the cursor, not outputSentToUser: piped follow-up
+  // questions in the same container may have been skipped after one answer.)
+  const helpdeskCursor = lastAgentTimestamp[chatJid];
+  const lastBotTs = getLastBotMessageTimestamp(chatJid, ASSISTANT_NAME);
+  if (
+    group.folder === HELPDESK_FOLDER &&
+    helpdeskCursor &&
+    (!lastBotTs || lastBotTs < helpdeskCursor)
+  ) {
+    const markerTs = new Date(
+      new Date(helpdeskCursor).getTime() + 1,
+    ).toISOString();
+    storeMessage({
+      id: `helpdesk-skip-${Date.now()}`,
+      chat_jid: chatJid,
+      sender: 'helpdesk-host',
+      sender_name: 'helpdesk-host',
+      content: '[helpdesk:skip]',
+      timestamp: markerTs,
+      is_from_me: false,
+      is_bot_message: true,
+    });
+  }
+
   return true;
 }
 
@@ -689,7 +717,10 @@ async function runAgent(
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
   const sessKey = sessionKey(group, chatJid);
-  const sessionId = sessions[sessKey];
+  // freshSession groups (helpdesk) never resume — each question starts clean.
+  const sessionId = group.containerConfig?.freshSession
+    ? undefined
+    : sessions[sessKey];
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();

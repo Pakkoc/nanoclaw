@@ -14,6 +14,16 @@ import {
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
+import {
+  HELPDESK_FOLDER,
+  HelpdeskKind,
+  checkHelpdeskCaps,
+  classifyHelpdeskText,
+  loadHelpdeskConfig,
+  logHelpdesk,
+  looksResolved,
+  recordHelpdeskWake,
+} from './helpdesk.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
   Channel,
@@ -95,6 +105,16 @@ export class DiscordChannel implements Channel {
       // startThread()가 스레드 안에 남기는 빈 시스템 메시지. 봇 작성으로 저장되면
       // 커서 복구가 이를 "마지막 봇 답장"으로 보고 원 게시글을 건너뛴다.
       if (message.type === MessageType.ThreadStarterMessage) return;
+
+      // Helpdesk channels (전체 채팅, 자유질문 포럼): human messages never take
+      // the normal path — a host-side filter decides whether to wake an agent.
+      if (!message.author.bot && message.guild) {
+        const kind = this.helpdeskKind(message);
+        if (kind) {
+          await this.handleHelpdeskMessage(message, kind);
+          return;
+        }
+      }
 
       const channelId = message.channelId;
       const realJid = `dc:${channelId}`;
@@ -313,6 +333,10 @@ export class DiscordChannel implements Channel {
       // 에이전트를 깨우지 않지만, 업무일지 크론의 raw SQL 쿼리에는 그대로 잡힘.
       const isSelfBot = message.author.id === this.client?.user?.id;
 
+      // Backstop: a helpdesk group must only be woken by handleHelpdeskMessage
+      // (e.g. if filter.json lost its channel IDs, chat must stay silent).
+      if (group.folder === HELPDESK_FOLDER && !isSelfBot) return;
+
       // ── Ticket channel: host-level staff intervention guard ──────────────
       // If a staff member has already posted in this ticket channel, Claude
       // must stay silent — no LLM reasoning involved.
@@ -425,13 +449,27 @@ export class DiscordChannel implements Channel {
 
       const textChannel = channel as TextChannel;
 
+      // Optional leading `[[reply:<messageId>]]` (used by the helpdesk agent)
+      // sends the first chunk as a Discord reply to that message.
+      let replyTo: string | null = null;
+      const directive = text.match(/^\s*\[\[reply:(\d+)\]\]\s*/);
+      if (directive) {
+        replyTo = directive[1];
+        text = text.slice(directive[0].length);
+        if (!text.trim()) return;
+      }
+
       // Discord has a 2000 character limit per message — split if needed
       const MAX_LENGTH = 2000;
-      if (text.length <= MAX_LENGTH) {
-        await textChannel.send(text);
-      } else {
-        for (let i = 0; i < text.length; i += MAX_LENGTH) {
-          await textChannel.send(text.slice(i, i + MAX_LENGTH));
+      for (let i = 0; i < text.length; i += MAX_LENGTH) {
+        const chunk = text.slice(i, i + MAX_LENGTH);
+        if (i === 0 && replyTo) {
+          await textChannel.send({
+            content: chunk,
+            reply: { messageReference: replyTo, failIfNotExists: false },
+          });
+        } else {
+          await textChannel.send(chunk);
         }
       }
       logger.info({ jid, length: text.length }, 'Discord message sent');
@@ -560,6 +598,257 @@ export class DiscordChannel implements Channel {
     });
   }
 
+  /** Which helpdesk stream a message belongs to, or null if none. */
+  private helpdeskKind(message: Message): HelpdeskKind | null {
+    const config = loadHelpdeskConfig();
+    if (config.chatChannelIds.includes(message.channelId)) return 'chat';
+    const isThread =
+      message.channel.type === ChannelType.PublicThread ||
+      message.channel.type === ChannelType.PrivateThread;
+    if (!isThread) return null;
+    const parentId = (message.channel as ThreadChannel).parentId ?? '';
+    if (!config.forumChannelIds.includes(parentId)) return null;
+    // A forum post's starter message shares the thread's ID.
+    return message.id === message.channelId ? 'forum-starter' : 'forum-followup';
+  }
+
+  /** Stages 1–2 (keyword/question, caps), then schedule the delayed check. */
+  private async handleHelpdeskMessage(
+    message: Message,
+    kind: HelpdeskKind,
+  ): Promise<void> {
+    const config = loadHelpdeskConfig();
+    if (!config.enabled) return;
+    if (TICKET_STAFF_IDS.has(message.author.id)) return;
+
+    const base = {
+      kind,
+      channelId: message.channelId,
+      messageId: message.id,
+      authorId: message.author.id,
+    };
+    const text =
+      kind === 'forum-starter'
+        ? `${(message.channel as ThreadChannel).name}\n${message.content}`
+        : message.content;
+
+    const cls = classifyHelpdeskText(text, kind, config);
+    if (!cls.pass) {
+      // Keyword hits are logged so the weekly review can spot misses.
+      if (cls.keyword)
+        logHelpdesk({
+          ...base,
+          stage: 'filter',
+          reason: cls.reason,
+          keyword: cls.keyword,
+          text,
+        });
+      return;
+    }
+
+    const botId = this.client?.user?.id;
+    let skip: string | null = null;
+    if (kind !== 'forum-starter') {
+      if (config.skipRepliesToOthers && message.reference?.messageId) {
+        try {
+          const ref = await message.channel.messages.fetch(
+            message.reference.messageId,
+          );
+          if (ref.author.id !== botId && ref.author.id !== message.author.id)
+            skip = 'reply-to-other';
+        } catch {
+          // Referenced message gone — treat as a standalone question.
+        }
+      }
+      if (
+        !skip &&
+        config.skipIfMentionsOthers &&
+        message.mentions.users.some(
+          (u) => u.id !== botId && u.id !== message.author.id,
+        )
+      )
+        skip = 'mentions-other';
+    }
+    skip = skip ?? checkHelpdeskCaps(message.author.id, config);
+    if (skip) {
+      logHelpdesk({
+        ...base,
+        stage: 'filter',
+        reason: skip,
+        keyword: cls.keyword,
+        text,
+      });
+      return;
+    }
+
+    logHelpdesk({
+      ...base,
+      stage: 'queued',
+      reason: 'candidate',
+      keyword: cls.keyword,
+      text,
+    });
+    setTimeout(() => {
+      this.helpdeskAfterDelay(message, kind, text, cls.keyword).catch((err) =>
+        logger.warn({ err, messageId: message.id }, 'Helpdesk delayed check failed'),
+      );
+    }, config.delaySeconds * 1000);
+  }
+
+  /** Stage 3: skip if a human already handled it, else wake the agent. */
+  private async helpdeskAfterDelay(
+    message: Message,
+    kind: HelpdeskKind,
+    text: string,
+    keyword: string | undefined,
+  ): Promise<void> {
+    const config = loadHelpdeskConfig();
+    if (!config.enabled || !this.client) return;
+    const base = {
+      kind,
+      channelId: message.channelId,
+      messageId: message.id,
+      authorId: message.author.id,
+      keyword,
+      text,
+    };
+    const asker = message.author.id;
+    const botId = this.client.user?.id;
+    const channel = message.channel;
+
+    let after: Message[];
+    try {
+      await channel.messages.fetch(message.id); // throws if deleted
+      const col = await channel.messages.fetch({
+        after: message.id,
+        limit: 50,
+      });
+      after = [...col.values()].sort(
+        (a, b) => a.createdTimestamp - b.createdTimestamp,
+      );
+    } catch {
+      logHelpdesk({ ...base, stage: 'delay-check', reason: 'deleted-or-fetch-failed' });
+      return;
+    }
+
+    const humans = after.filter((m) => !m.author.bot);
+    const others = humans.filter((m) => m.author.id !== asker);
+    let answered: string | null = null;
+    if (others.some((m) => TICKET_STAFF_IDS.has(m.author.id)))
+      answered = 'staff-active';
+    else if (kind !== 'chat' && others.length > 0) answered = 'human-replied';
+    else if (
+      others.some(
+        (m) =>
+          m.reference?.messageId === message.id || m.mentions.users.has(asker),
+      )
+    )
+      answered = 'human-replied';
+    else if (
+      after.some(
+        (m) => m.author.id === botId && m.reference?.messageId === message.id,
+      )
+    )
+      answered = 'bot-replied';
+    else if (
+      humans.some(
+        (m) => m.author.id === asker && looksResolved(m.content, config),
+      )
+    )
+      answered = 'resolved';
+    answered = answered ?? checkHelpdeskCaps(asker, config);
+    if (answered) {
+      logHelpdesk({ ...base, stage: 'delay-check', reason: answered });
+      return;
+    }
+
+    let before: Message[] = [];
+    if (kind !== 'forum-starter' && config.contextBefore > 0) {
+      try {
+        const col = await channel.messages.fetch({
+          before: message.id,
+          limit: config.contextBefore,
+        });
+        before = [...col.values()]
+          .filter((m) => !m.author.bot || m.author.id === botId)
+          .sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+      } catch {
+        // Context is best-effort.
+      }
+    }
+
+    const nameOf = (m: Message) =>
+      m.author.id === botId
+        ? '부엉이(나)'
+        : m.member?.displayName || m.author.displayName || m.author.username;
+    const line = (m: Message) =>
+      `- ${nameOf(m)}: ${(m.content || '[첨부/빈 메시지]').replace(/\s+/g, ' ').slice(0, 300)}`;
+    const afterCtx = after
+      .filter((m) => !m.author.bot || m.author.id === botId)
+      .slice(0, config.contextAfter);
+
+    const isThread = kind !== 'chat';
+    const thread = isThread ? (channel as ThreadChannel) : null;
+    const askerName = nameOf(message);
+    const parts = [
+      `[helpdesk kind:${kind} channel:${message.channelId} message:${message.id} asker:<@${asker}> askerName:${askerName}]`,
+    ];
+    if (thread) parts.push(`포럼 글 제목: ${thread.name}`);
+    if (before.length) parts.push('앞 대화:', ...before.map(line));
+    parts.push(
+      '질문:',
+      `- ${askerName}: ${message.content.slice(0, 1500) || '[첨부/빈 메시지]'}`,
+    );
+    if (message.attachments.size > 0)
+      parts.push(`(첨부 ${message.attachments.size}개 — 내용은 볼 수 없음)`);
+    parts.push(
+      afterCtx.length ? '질문 이후 대화:' : '질문 이후 대화: 없음',
+      ...afterCtx.map(line),
+    );
+    const content = parts.join('\n');
+
+    const jid = `dc:${message.channelId}`;
+    const guildName = message.guild?.name ?? '';
+    const chatName = thread
+      ? `${guildName} #${thread.name}`
+      : `${guildName} #${(channel as TextChannel).name}`;
+    const nowIso = new Date().toISOString();
+    this.opts.onChatMetadata(jid, nowIso, chatName, 'discord', true);
+    if (!this.opts.registeredGroups()[jid]) {
+      this.opts.registerGroup(jid, {
+        name: `헬프데스크 ${thread ? '🧵' + thread.name : '#' + (channel as TextChannel).name}`,
+        folder: HELPDESK_FOLDER,
+        trigger: this.opts.defaultTrigger(),
+        added_at: nowIso,
+        requiresTrigger: false,
+        containerConfig: {
+          model: 'claude-sonnet-5-5',
+          effort: 'medium',
+          freshSession: true,
+        },
+      });
+    }
+    if (!this.opts.registeredGroups()[jid]) {
+      logHelpdesk({ ...base, stage: 'delay-check', reason: 'register-failed' });
+      return;
+    }
+
+    recordHelpdeskWake(asker);
+    // Delivery time, not the original timestamp: keeps the cursor monotonic
+    // even though delivery is delayed.
+    this.opts.onMessage(jid, {
+      id: message.id,
+      chat_jid: jid,
+      sender: asker,
+      sender_name: askerName,
+      content,
+      timestamp: nowIso,
+      is_from_me: false,
+      is_bot_message: false,
+    });
+    logHelpdesk({ ...base, stage: 'woke', reason: 'delivered' });
+  }
+
   private handleChannelDeleted(channelId: string): void {
     const jid = `dc:${channelId}`;
     const group = this.opts.registeredGroups()[jid];
@@ -567,7 +856,9 @@ export class DiscordChannel implements Channel {
     const isLifecycleGroup =
       group.folder.startsWith('discord_tickets_ch') ||
       group.folder.startsWith('diaries/') ||
-      group.containerConfig?.sessionPerJid === true;
+      group.containerConfig?.sessionPerJid === true ||
+      (group.folder === HELPDESK_FOLDER &&
+        !loadHelpdeskConfig().chatChannelIds.includes(channelId));
     if (!isLifecycleGroup) return;
 
     this.opts.deregisterGroup(jid);

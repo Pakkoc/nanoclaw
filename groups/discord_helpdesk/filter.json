@@ -1,0 +1,31 @@
+{
+  "enabled": true,
+  "chatChannelIds": ["1231183465618346054"],
+  "forumChannelIds": ["1213139234660159498"],
+  "delaySeconds": 180,
+  "dailyWakeLimit": 15,
+  "userCooldownMinutes": 30,
+  "minLength": 6,
+  "maxLength": 600,
+  "topicKeywords": [
+    "다이어리", "기숙사", "휴면", "티켓", "부엉이-편지", "부엉이편지",
+    "레벨", "전직", "경험치", "xp", "학생증", "/time", "공부시간", "잔디",
+    "랭킹", "수석", "차석", "cam study", "캠스터디", "1인실", "2인실",
+    "bedroom", "베드룸", "공부방", "음성방", "동아리", "역할", "직군",
+    "닉네임", "태그", "칭호", "수상내역", "이벤트", "학생회", "운영진",
+    "교칙", "경고", "공부알림", "뮤지", "디데이", "dday", "/todo", "투두",
+    "마법도서관", "채널", "방 만들", "마법사", "신고"
+  ],
+  "questionPatterns": [
+    "\\?", "？", "나요", "까요", "가요", "는지", "을까", "ㄹ까",
+    "어떻게", "어케", "어떡", "어디서", "어디에", "어딨", "방법",
+    "알려\\s*주", "궁금", "뭐예요", "뭔가요", "모르겠", "안\\s*보여",
+    "안\\s*되", "안돼", "되나", "있나", "하나요", "가능"
+  ],
+  "excludePatterns": [],
+  "skipRepliesToOthers": true,
+  "skipIfMentionsOthers": true,
+  "contextBefore": 5,
+  "contextAfter": 10,
+  "resolvedPatterns": ["해결", "찾았", "됐어요", "감사"]
+}

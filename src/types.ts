@@ -35,6 +35,7 @@ export interface ContainerConfig {
   effort?: 'low' | 'medium' | 'high' | 'max'; // Reasoning effort level
   threadSessions?: boolean; // Each top-level post opens a Discord thread; the conversation (and Claude session) lives in that thread
   sessionPerJid?: boolean; // Key the Claude session by JID instead of folder (threads of a threadSessions channel)
+  freshSession?: boolean; // Never resume a stored session — every container starts clean (helpdesk)
 }
 
 export interface RegisteredGroup {

@@ -388,6 +388,7 @@ If a user wants tasks running more than ~2x daily and a script can't reduce agen
 
 - **ticket-\* 패턴 (티켓 카테고리 1227530533567991881)**: 멘션 없이 응답. 일반 멤버 대상이라 친절하게.
 - **그 외 모든 채널**: 멘션/호출과 무관하게 **절대 침묵**. 토큰 절약용.
+- **예외 — 헬프데스크** (전체 채팅 1231183465618346054, 자유질문 포럼 1213139234660159498): 호스트 필터를 통과한 서버 질문만 `discord_helpdesk` 그룹이 자동 답변한다. 이 세션(main)은 관여하지 않는다. 아래 "헬프데스크" 섹션 참고.
 
 ### 기숙사 변경 이력 확인
 
@@ -600,6 +601,24 @@ curl -sS -H "Authorization: Bot $DISCORD_BOT_TOKEN"   -H 'User-Agent: DiscordBot
 ```
 
 `Unknown Channel` 응답이면 삭제된 것, 이름/부모 정보가 나오면 존재.
+
+---
+
+## 💬 헬프데스크 (공개 채널 서버 질문 자동 답변, 2026-10-27 운명교향곡 지시)
+
+전체 채팅(1231183465618346054)과 자유질문 포럼(1213139234660159498)의 서버 이용 질문에 부엉이가 자동으로 답한다. 비용 때문에 **호스트에서 먼저 거른다**:
+
+1. 키워드 + 질문 형태 필터 (무료) — `groups/discord_helpdesk/filter.json`
+2. 하루 최대 15번, 같은 사람은 30분에 1번 (무료)
+3. 3분 기다린 뒤 사람(특히 운영진)이 이미 답했으면 건너뜀 (무료)
+4. 통과한 것만 `discord_helpdesk` 그룹(Sonnet, 매번 새 세션)을 깨움 → 서버 안내서에 답이 있을 때만 답장, 아니면 침묵
+
+- 코드: `src/channels/helpdesk.ts`(필터), `src/channels/discord.ts`(연결)
+- 답변 규칙: `groups/discord_helpdesk/CLAUDE.md`
+- 필터 설정: `groups/discord_helpdesk/filter.json` — 수정하면 재시작 없이 바로 반영. `"enabled": false`로 바로 끌 수 있다
+- 로그: `groups/discord_helpdesk/logs/helpdesk-YYYY-MM.jsonl` (키워드가 걸린 메시지만, 단계·사유 포함), `groups/discord_helpdesk/decisions.jsonl` (에이전트가 답했는지와 이유)
+- 주간 점검: 매주 월요일 10:00 태스크가 로그를 보고 필터와 답변 규칙을 직접 고친다. 서버 안내서는 직접 고치지 않고, 빈 곳은 후보로 제안한다.
+- "헬프데스크 꺼 줘/켜 줘" 같은 요청은 운영 업무가 아니라 파일 수정이다 → 성호·요나새·운명교향곡만 가능.
 
 ---
 
