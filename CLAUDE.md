@@ -75,6 +75,8 @@ curl -s -o /dev/null -w "HTTP %{http_code}\n" --proxy "$PROXY" --cacert "$SP/ca.
 
 **비밀값·스킬 노출 범위** (`src/container-runner.ts`, 2026-10-21): 회원과 대화하는 non-main 컨테이너는 실제 `tools.env`를 보지 못한다. 티켓(`discord_tickets*`)은 `DISCORD_BOT_TOKEN`만 담긴 `data/secrets/tools-ticket.env`(컨테이너 시작 때마다 tools.env에서 다시 만듦)를, 다이어리 등 나머지는 빈 파일을 같은 경로에 받는다. 스킬도 허용 목록(`NON_MAIN_SKILLS`, `TICKET_SKILLS`)에 있는 것만 복사되며, 목록에 없는 새 스킬은 업무채널 전용이 된다. 티켓 스킬이 새 비밀값을 필요로 하면 `writeTicketToolsEnv`의 `keep` 목록에 추가할 것
 
+**형제 봇 폴더** (`src/sibling-bots.ts`, 2026-10-28): main 컨테이너에만 `.env`의 `BOTS_ROOT`(`~/discord-bot`) 하위 폴더(NanoClaw 자신 제외)를 `/workspace/discord-bot/<이름>`에 rw로 마운트한다. 에이전트가 `data/ipc/pm2-restart.flag`에 앱 이름을 쓰면 호스트가 `RESTARTABLE_PM2_APPS`(`music-bot,lavalink,discord-bot`)에 있는 경우만 `pm2 restart`하고 `data/ipc/pm2-restart.log`에 결과를 남긴다. 외주 봇(`~/outsourcing`)은 마운트·재시작 대상이 아니다
+
 ### 등록된 스케줄 태스크 (`scheduled_tasks` 테이블, 미니 PC DB)
 
 모두 `group_folder=discord_main`, 타임존 Asia/Seoul:

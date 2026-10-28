@@ -10,6 +10,8 @@ const envConfig = readEnvFile([
   'ASSISTANT_HAS_OWN_NUMBER',
   'ONECLI_URL',
   'TZ',
+  'BOTS_ROOT',
+  'RESTARTABLE_PM2_APPS',
 ]);
 
 export const ASSISTANT_NAME =
@@ -40,6 +42,21 @@ export const SENDER_ALLOWLIST_PATH = path.join(
 export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
 export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
+
+// Folder holding NanoClaw and its sibling bots (e.g. ~/discord-bot). Every
+// other subfolder is mounted read-write into the main container only.
+// Unset = no sibling mounts.
+export const BOTS_ROOT = process.env.BOTS_ROOT || envConfig.BOTS_ROOT || '';
+// PM2 app names the main agent may restart via data/ipc/pm2-restart.flag.
+// Anything not listed is refused, so other PM2 bots on the host stay out of reach.
+export const RESTARTABLE_PM2_APPS = (
+  process.env.RESTARTABLE_PM2_APPS ||
+  envConfig.RESTARTABLE_PM2_APPS ||
+  ''
+)
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
 
 export const CONTAINER_IMAGE =
   process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';

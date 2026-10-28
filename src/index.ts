@@ -19,6 +19,7 @@ import {
   TIMEZONE,
 } from './config.js';
 import './channels/index.js';
+import { startPm2RestartWatcher } from './sibling-bots.js';
 import {
   getChannelFactory,
   getRegisteredChannelNames,
@@ -1653,6 +1654,7 @@ async function main(): Promise<void> {
   });
   startSessionCleanup();
   startDeployWatcher();
+  startPm2RestartWatcher();
   startReplyWatchdog();
   startPullWatcher();
   queue.setProcessMessagesFn(processGroupMessages);

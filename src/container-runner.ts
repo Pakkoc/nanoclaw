@@ -7,6 +7,7 @@ import fs from 'fs';
 import path from 'path';
 
 import {
+  BOTS_ROOT,
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
@@ -27,6 +28,7 @@ import {
 } from './container-runtime.js';
 import { OneCLI } from '@onecli-sh/sdk';
 import { validateAdditionalMounts } from './mount-security.js';
+import { siblingBotMounts } from './sibling-bots.js';
 import { RegisteredGroup } from './types.js';
 
 const onecli = new OneCLI({ url: ONECLI_URL });
@@ -148,6 +150,10 @@ function buildVolumeMounts(
         readonly: false,
       });
     }
+
+    // Sibling bots under BOTS_ROOT (same Discord server, same admins) —
+    // read-write for main only. Restarts go through pm2-restart.flag.
+    mounts.push(...siblingBotMounts(BOTS_ROOT, projectRoot));
   } else {
     // Other groups only get their own folder
     mounts.push({
