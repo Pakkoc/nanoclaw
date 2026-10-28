@@ -609,7 +609,9 @@ export class DiscordChannel implements Channel {
     const parentId = (message.channel as ThreadChannel).parentId ?? '';
     if (!config.forumChannelIds.includes(parentId)) return null;
     // A forum post's starter message shares the thread's ID.
-    return message.id === message.channelId ? 'forum-starter' : 'forum-followup';
+    return message.id === message.channelId
+      ? 'forum-starter'
+      : 'forum-followup';
   }
 
   /** Stages 1–2 (keyword/question, caps), then schedule the delayed check. */
@@ -647,6 +649,10 @@ export class DiscordChannel implements Channel {
     }
 
     const botId = this.client?.user?.id;
+    // Questions aimed at staff (reply/mention) still count as questions.
+    // If staff actually answer, the delayed check skips them ('staff-active').
+    const isOther = (id: string) =>
+      id !== botId && id !== message.author.id && !TICKET_STAFF_IDS.has(id);
     let skip: string | null = null;
     if (kind !== 'forum-starter') {
       if (config.skipRepliesToOthers && message.reference?.messageId) {
@@ -654,8 +660,7 @@ export class DiscordChannel implements Channel {
           const ref = await message.channel.messages.fetch(
             message.reference.messageId,
           );
-          if (ref.author.id !== botId && ref.author.id !== message.author.id)
-            skip = 'reply-to-other';
+          if (isOther(ref.author.id)) skip = 'reply-to-other';
         } catch {
           // Referenced message gone — treat as a standalone question.
         }
@@ -663,9 +668,7 @@ export class DiscordChannel implements Channel {
       if (
         !skip &&
         config.skipIfMentionsOthers &&
-        message.mentions.users.some(
-          (u) => u.id !== botId && u.id !== message.author.id,
-        )
+        message.mentions.users.some((u) => isOther(u.id))
       )
         skip = 'mentions-other';
     }
@@ -690,7 +693,10 @@ export class DiscordChannel implements Channel {
     });
     setTimeout(() => {
       this.helpdeskAfterDelay(message, kind, text, cls.keyword).catch((err) =>
-        logger.warn({ err, messageId: message.id }, 'Helpdesk delayed check failed'),
+        logger.warn(
+          { err, messageId: message.id },
+          'Helpdesk delayed check failed',
+        ),
       );
     }, config.delaySeconds * 1000);
   }
@@ -727,7 +733,11 @@ export class DiscordChannel implements Channel {
         (a, b) => a.createdTimestamp - b.createdTimestamp,
       );
     } catch {
-      logHelpdesk({ ...base, stage: 'delay-check', reason: 'deleted-or-fetch-failed' });
+      logHelpdesk({
+        ...base,
+        stage: 'delay-check',
+        reason: 'deleted-or-fetch-failed',
+      });
       return;
     }
 

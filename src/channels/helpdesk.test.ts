@@ -35,7 +35,9 @@ describe('classifyHelpdeskText', () => {
   });
 
   it('drops chat without a topic keyword', () => {
-    expect(classifyHelpdeskText('오늘 점심 뭐 먹나요?', 'chat', config)).toEqual({
+    expect(
+      classifyHelpdeskText('오늘 점심 뭐 먹나요?', 'chat', config),
+    ).toEqual({
       pass: false,
       reason: 'no-keyword',
     });
@@ -48,17 +50,25 @@ describe('classifyHelpdeskText', () => {
   });
 
   it('exempts forum starters from the question check', () => {
-    const r = classifyHelpdeskText('레벨 관련 문의\n레벨이 안 올라감', 'forum-starter', config);
+    const r = classifyHelpdeskText(
+      '레벨 관련 문의\n레벨이 안 올라감',
+      'forum-starter',
+      config,
+    );
     expect(r.pass).toBe(true);
   });
 
   it('keyword match is case-insensitive', () => {
     const c = { ...config, topicKeywords: ['XP'] };
-    expect(classifyHelpdeskText('xp는 어떻게 오르나요', 'chat', c).pass).toBe(true);
+    expect(classifyHelpdeskText('xp는 어떻게 오르나요', 'chat', c).pass).toBe(
+      true,
+    );
   });
 
   it('enforces length bounds', () => {
-    expect(classifyHelpdeskText('레벨?', 'chat', config).reason).toBe('too-short');
+    expect(classifyHelpdeskText('레벨?', 'chat', config).reason).toBe(
+      'too-short',
+    );
     const long = '레벨?' + 'ㄱ'.repeat(700);
     expect(classifyHelpdeskText(long, 'chat', config).reason).toBe('too-long');
   });
@@ -83,7 +93,9 @@ describe('caps', () => {
     const t = Date.parse('2026-10-27T03:00:00Z');
     expect(checkHelpdeskCaps('u1', config, t)).toBeNull();
     recordHelpdeskWake('u1', t);
-    expect(checkHelpdeskCaps('u1', config, t + 10 * 60_000)).toBe('user-cooldown');
+    expect(checkHelpdeskCaps('u1', config, t + 10 * 60_000)).toBe(
+      'user-cooldown',
+    );
     expect(checkHelpdeskCaps('u1', config, t + 31 * 60_000)).toBeNull();
     expect(checkHelpdeskCaps('u2', config, t)).toBeNull();
   });
