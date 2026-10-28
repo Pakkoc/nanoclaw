@@ -55,3 +55,12 @@ bash /home/node/.claude/skills/diary-create/create-diary.sh <user_id> <ticket_ch
 ## 환경
 
 스크립트는 `/workspace/global/tools.env`에서 `DISCORD_BOT_TOKEN`을 로드한다.
+
+## 다이어리 이름 변경 (rename-diary.sh)
+
+```bash
+bash /home/node/.claude/skills/diary-create/rename-diary.sh <user_id> '<이전 닉네임>' '<새 이름>' <ticket_channel_id>
+```
+
+요청자에게 주인 권한(type=1 overwrite + 글쓰기)이 있는 활성 기숙사 다이어리만 바꾼다. 못 찾거나 휴면·남의 채널이면 티켓에 대기 안내 + 업무채널 알림. 완료/실패 메시지는 스크립트가 직접 보낸다.
+(티켓 컨테이너는 TICKET_SKILLS 허용 목록에 있는 diary-create 폴더만 받으므로 별도 스킬 폴더로 분리하지 않았다.)
