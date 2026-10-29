@@ -29,6 +29,8 @@ const GROUP_FOLDER = 'discord_main';
 const CHAT_JID = 'dc:1489283292489449585';     // 🦉부엉이-업무전달
 const ADMIN_CHANNEL = '1489283292489449585';
 const NOTICE_CHANNEL = '1231132864867860511';    // 월간 랭킹 공지 대상
+// 매일 자동 보고(업무일지 등)는 업무채널 본문 대신 이 스레드로 보낸다 (2026-10-29 성호 지시)
+const LOG_THREAD_JID = 'dc:1565156149181943819'; // 📒 업무일지 스레드
 
 // ─────────────── Prompts ───────────────
 
@@ -188,7 +190,7 @@ SQL
 
 1. Write 도구로 파일 저장
 2. Read로 재확인 (저장 성공 검증)
-3. 업무일지 전문을 응답 텍스트에 포함해서 전달 (관리자 채널로 자동 라우팅됨)
+3. 업무일지 전문을 응답 텍스트에 포함해서 전달 (업무채널의 📒 업무일지 스레드로 자동 라우팅됨)
    - "업무일지 작성 완료" 문구와 함께 전문 첨부
    - **post-discord 스킬 호출 금지** — 응답 텍스트만 사용 (이중 전송 방지)
 
@@ -205,7 +207,7 @@ const memoryCleanupPrompt = `매일 새벽 3시 — 오래된 세션 덤프 정�
 
 3. 업무일지(YYYY-MM-DD.md)는 절대 건드리지 않는다 (스킬이 세션 덤프 YYYY-MM-DD-HHMM.md만 타겟팅)
 
-4. 삭제된 파일이 100개 이상이면 관리자 채널(${ADMIN_CHANNEL})에 보고, 적으면 조용히 처리.`;
+4. 삭제된 파일이 100개 이상이면 응답 텍스트로 보고(📒 업무일지 스레드로 자동 전송), 적으면 조용히 처리.`;
 
 // SQL queries need single quotes. We build them with \u0027 to avoid
 // escaping gymnastics inside the template literal.
@@ -399,11 +401,13 @@ const TASKS = [
     id: 'migrated-heartbeat-daily-log',
     schedule_value: '0 9 * * *',       // 매일 09:00 KST
     prompt: dailyLogPrompt,
+    chat_jid: LOG_THREAD_JID,
   },
   {
     id: 'migrated-heartbeat-memory-cleanup',
     schedule_value: '0 3 * * *',       // 매일 03:00 KST
     prompt: memoryCleanupPrompt,
+    chat_jid: LOG_THREAD_JID,
   },
   {
     id: 'migrated-monthly-ranking',
@@ -460,7 +464,7 @@ const tx = db.transaction(() => {
     upsert.run(
       t.id,
       GROUP_FOLDER,
-      CHAT_JID,
+      t.chat_jid ?? CHAT_JID,
       t.prompt,
       null,
       'cron',
