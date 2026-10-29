@@ -60,13 +60,17 @@ KST는 UTC+9. 시간 비교 시 SQLite의 \`datetime(timestamp, '+9 hours')\` �
 
 \`\`\`bash
 sqlite3 /workspace/project/store/messages.db <<SQL
-SELECT datetime(timestamp) AS time, is_from_me, sender_name, substr(content, 1, 300) AS content
-FROM messages
-WHERE chat_jid = 'dc:${ADMIN_CHANNEL}'
-  AND datetime(timestamp) >= datetime('now', '-24 hours')
-ORDER BY timestamp;
+SELECT datetime(m.timestamp) AS time, c.name AS thread, m.is_from_me, m.sender_name, substr(m.content, 1, 300) AS content
+FROM messages m
+LEFT JOIN chats c ON c.jid = m.chat_jid
+WHERE m.chat_jid IN (SELECT jid FROM registered_groups WHERE folder = 'discord_main')
+  AND datetime(m.timestamp) >= datetime('now', '-24 hours')
+ORDER BY m.chat_jid, m.timestamp;
 SQL
 \`\`\`
+
+업무는 스레드 단위로 진행된다 (\`thread\` 컬럼 = 업무 스레드 이름). 스레드별로 묶어서 요약할 것.
+📒 업무일지 스레드(\`${LOG_THREAD_JID}\`)에 부엉이가 올린 자동 보고(\`is_from_me=1\`)는 요약하지 않는다. 그 스레드에서는 운영진 답글과 그에 대한 답만 본다.
 
 여기서 추출: 주요 질문/답변, 관리자 지시사항, 오고 간 대화의 핵심
 
