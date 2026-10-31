@@ -199,13 +199,13 @@ def remove_user_overwrites(channel_id, overwrites):
 all_channels = api_get(f"/guilds/{GUILD_ID}/channels")
 if not isinstance(all_channels, list):
     print(json.dumps({"wakeAgent": False, "error": "채널 조회 실패"}))
+    sys.exit(0)
 
 # ─── 1-1. Guild 전체 활성 스레드 캐싱 ──────────────────────────────────
 # /channels/{id}/threads/active 는 해당 채널의 활성 스레드를 반환하지 않는 경우가 있음.
 # guild 전체 활성 스레드를 한 번에 가져와 parent_id로 필터링하는 방식 사용.
 _active_data = api_get(f"/guilds/{GUILD_ID}/threads/active")
 GUILD_ACTIVE_THREADS = _active_data.get("threads", []) if isinstance(_active_data, dict) else []
-    sys.exit(0)
 
 # ─── 2. 서버 멤버 전체 조회 (페이지네이션) ─────────────────────────────
 members = set()
