@@ -30,7 +30,11 @@ done
 export DORMANT_MONTHS="${DORMANT_MONTHS:-3}"
 export DORMANT_TARGET_CAT="${DORMANT_TARGET_CAT:-}"
 
-python3 << PYEOF
+# 파이썬이 실패하거나 결과 JSON이 없으면 조용히 넘어가지 않고 실패로 기록한다
+# (2026-10-06~10-31 문법 오류로 매일 "성공"인 채 아무것도 안 한 사고 이후)
+FAILURE_LOG="/workspace/group/diary-failures.jsonl"
+ERR_FILE=$(mktemp)
+OUTPUT=$(python3 2>"$ERR_FILE" << PYEOF
 import os, json, time, sys
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError
@@ -198,8 +202,8 @@ def remove_user_overwrites(channel_id, overwrites):
 # ─── 1. 서버 전체 채널 조회 ─────────────────────────────────────────────
 all_channels = api_get(f"/guilds/{GUILD_ID}/channels")
 if not isinstance(all_channels, list):
-    print(json.dumps({"wakeAgent": False, "error": "채널 조회 실패"}))
-    sys.exit(0)
+    print("채널 조회 실패: " + str(all_channels)[:300], file=sys.stderr)
+    sys.exit(1)
 
 # ─── 1-1. Guild 전체 활성 스레드 캐싱 ──────────────────────────────────
 # /channels/{id}/threads/active 는 해당 채널의 활성 스레드를 반환하지 않는 경우가 있음.
@@ -394,3 +398,30 @@ print(json.dumps({
     }
 }))
 PYEOF
+)
+PY_RC=$?
+
+LAST_LINE=$(printf '%s\n' "$OUTPUT" | tail -1)
+if [ "$PY_RC" -eq 0 ] && printf '%s' "$LAST_LINE" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if 'wakeAgent' in d else 1)" 2>/dev/null; then
+  printf '%s\n' "$OUTPUT"
+  rm -f "$ERR_FILE"
+  exit 0
+fi
+
+python3 - "$FAILURE_LOG" "$PY_RC" "$ERR_FILE" "$DORMANT_MONTHS" "$DORMANT_TARGET_CAT" <<'PYREC' || true
+import json, sys, time, os
+path, rc, errf, months, cat = sys.argv[1:6]
+try:
+    err = open(errf, encoding="utf-8", errors="replace").read().strip().splitlines()[-15:]
+except Exception:
+    err = []
+os.makedirs(os.path.dirname(path), exist_ok=True)
+rec = {"ts": time.strftime("%Y-%m-%d %H:%M:%S"), "type": "dormant-move",
+       "exit_code": int(rc), "months": months, "category": cat, "stderr_tail": err}
+with open(path, "a", encoding="utf-8") as f:
+    f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+print(json.dumps({"wakeAgent": True, "data": {"failed": True, "exit_code": int(rc),
+                  "error": "\n".join(err)[-1500:] or "결과 없음"}}, ensure_ascii=False))
+PYREC
+rm -f "$ERR_FILE"
+exit 0

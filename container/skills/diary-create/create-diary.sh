@@ -137,17 +137,38 @@ send_message() {
 COMPLETE_MSG_SENT=0
 NEW_CHANNEL_ID=""
 
-# EXIT trap — 완료 메시지가 전송되지 않았으면 관리자 채널에 알림
+# EXIT trap — 실패하면 실패 기록을 남기고 알림 스레드에 알림
+# 실패 기록(diary-failures.jsonl)은 업무채널의 10분 감시 태스크가 읽어서 부엉이를 깨운다
+# (2026-10-31 운명교향곡 지시: 기술 문제면 부엉이가 알아서 고치고 이 스레드로 보고)
+ALERT_CHANNEL="1566036078664884295"  # 업무채널 "다이어리 실패 알림" 스레드
+FAILURE_LOG="/workspace/group/diary-failures.jsonl"
 cleanup() {
   local exit_code=$?
-  if [ "$COMPLETE_MSG_SENT" -eq 0 ]; then
-    if [ -n "$NEW_CHANNEL_ID" ]; then
+  if [ -n "$NEW_CHANNEL_ID" ]; then
+    if [ "$COMPLETE_MSG_SENT" -eq 0 ]; then
       log "INFO: 완료 메시지 미전송이나 채널($NEW_CHANNEL_ID)은 정상 생성됨 — 관리자 알림 생략"
-    else
-      log "WARNING: 다이어리 생성 실패 감지 (exit_code=$exit_code) — 관리자 채널 알림"
-      local alert="⚠️ 다이어리 생성 실패\n티켓 채널: <#${TICKET_CHANNEL_ID}>\n로그: $LOG_FILE"
-      send_message "$ADMIN_CHANNEL" "$(printf '%b' "$alert")" || true
     fi
+  elif [ "$exit_code" -ne 0 ] || [ "$COMPLETE_MSG_SENT" -eq 0 ]; then
+    log "WARNING: 다이어리 생성 실패 감지 (exit_code=$exit_code) — 실패 기록 + 알림"
+    python3 - "$FAILURE_LOG" "$TICKET_CHANNEL_ID" "${USER_ID:-}" "${CONFIRM_MODE:-}" "$exit_code" "$LOG_FILE" <<'PYREC' 2>/dev/null || true
+import json, sys, time, os
+path, ticket, user, mode, code, logf = sys.argv[1:7]
+try:
+    tail = open(logf, encoding="utf-8", errors="replace").read().splitlines()[-30:]
+except Exception:
+    tail = []
+os.makedirs(os.path.dirname(path), exist_ok=True)
+with open(path, "a", encoding="utf-8") as f:
+    f.write(json.dumps({"ts": time.strftime("%Y-%m-%d %H:%M:%S"), "type": "diary-create",
+        "ticket_channel": ticket, "user_id": user, "mode": mode,
+        "exit_code": int(code), "log_tail": tail}, ensure_ascii=False) + "\n")
+PYREC
+    local last_err
+    last_err=$(grep -E "ERROR|꽉 참" "$LOG_FILE" 2>/dev/null | tail -1 | cut -c23-200)
+    send_message "$ALERT_CHANNEL" "⚠️ 다이어리 생성 실패
+티켓: <#${TICKET_CHANNEL_ID}>
+사유: ${last_err:-알 수 없음}
+부엉이가 10분 안에 원인을 확인해요." || true
   fi
   log "=== 스크립트 종료 (exit=$exit_code) ==="
 }
