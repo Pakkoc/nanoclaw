@@ -269,7 +269,7 @@ print(count)
     if [ "$CAT_COUNT" -ge 50 ]; then
       log "카테고리 꽉 참 ($CAT_COUNT/50) — 휴면 정리 시도..."
       CLEANED=0
-      for MONTHS in 6 5 4 3 2 1; do
+      for MONTHS in 3; do  # 휴면 기준 3개월까지만 (2026-10-31 운명교향곡)
         DORMANT_MONTHS=$MONTHS DORMANT_TARGET_CAT=$CATEGORY_ID bash "$DORMANT_MOVE_SCRIPT" > /dev/null 2>&1 || true
         GUILD_CHANNELS=$(api_get "/guilds/$GUILD_ID/channels")
         CAT_COUNT=$(echo "$GUILD_CHANNELS" | python3 -c "
@@ -536,7 +536,7 @@ print(count)
 if [ "$CAT_COUNT" -ge 50 ]; then
   log "카테고리 꽉 참 ($CAT_COUNT/50) — 휴면 정리 자동 시도..."
   CLEANED=0
-  for MONTHS in 6 5 4 3 2 1; do
+  for MONTHS in 3; do  # 휴면 기준 3개월까지만 (2026-10-31 운명교향곡)
     log "  휴면 정리 시도: ${MONTHS}개월 기준..."
     DORMANT_MONTHS=$MONTHS DORMANT_TARGET_CAT=$CATEGORY_ID bash "$DORMANT_MOVE_SCRIPT" > /dev/null 2>&1 || true
 
